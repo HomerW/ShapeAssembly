@@ -2,3 +2,6 @@
 *__pycache__*
 *.pt
 model_output/*
+train_out
+Pointnet2_PyTorch
+*.out

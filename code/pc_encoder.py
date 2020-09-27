@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from collections import namedtuple
 import etw_pytorch_utils as pt_utils
-from pointnet2.utils.pointnet2_modules import PointnetSAModule
+from pointnet2_ops.pointnet2_modules import PointnetSAModule
 
 class PCEncoder(nn.Module):
     r"""
@@ -30,6 +30,7 @@ class PCEncoder(nn.Module):
                 nsample=64,
                 mlp=[input_channels, 64, 64, 128],
                 use_xyz=use_xyz,
+                bn=False
             )
         )
         self.SA_modules.append(
@@ -39,10 +40,11 @@ class PCEncoder(nn.Module):
                 nsample=64,
                 mlp=[128, 128, 128, 256],
                 use_xyz=use_xyz,
+                bn=False
             )
         )
         self.SA_modules.append(
-            PointnetSAModule(mlp=[256, 256, 512, 1024], use_xyz=use_xyz)
+            PointnetSAModule(mlp=[256, 256, 512, 1024], use_xyz=use_xyz, bn=False)
         )
 
         self.FC_layer = (
@@ -68,7 +70,9 @@ class PCEncoder(nn.Module):
         for module in self.SA_modules:
             xyz, features = module(xyz, features)
 
-        return self.FC_layer(features.squeeze(-1))
+        return features.squeeze(-1)
+
+        # return self.FC_layer(features.squeeze(-1))
 
 
 if __name__ == '__main__':
