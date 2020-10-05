@@ -17,10 +17,12 @@ import argparse
 from tqdm import tqdm
 import ast
 import metrics
-from pointnet_fixed import PointNetEncoder as PCEncoder
-from model_prog import FDGRU, load_progs, progToData, getInds, _col, \
-                                run_train_decoder, run_eval_decoder
+# from pointnet_fixed_reencode import PointNetEncoder as PCEncoder
+from pc_encoder import PCEncoder
+from model_prog_reencode import FDGRU, load_progs, progToData, getInds, _col, \
+                                run_train_decoder, run_eval_decoder, getLossConfig
 from ShapeAssembly import hier_execute, Program
+from reencode import get_train_pc
 
 num_samps = 5000
 hidden_dim = 1024
@@ -35,12 +37,12 @@ enc_step = 5000
 enc_decay = 1.0
 device = torch.device("cuda")
 
-def prog_to_pc(prog):
-    verts, faces = hier_execute(prog)
-    for i in range(3):
-        verts[:,i] = verts[:,i] - verts[:,i].mean()
-    pc = utils.sample_surface(faces, verts.unsqueeze(0), num_samps, return_normals=False)[0]
-    return pc
+# def prog_to_pc(prog, ns):
+#     verts, faces = hier_execute(prog)
+#     for i in range(3):
+#         verts[:,i] = verts[:,i] - verts[:,i].mean()
+#     pc = utils.sample_surface(faces, verts.unsqueeze(0), ns, return_normals=False)[0]
+#     return pc
 
 # just takes root program
 def lines_to_pc(lines):
@@ -74,30 +76,45 @@ def lines_to_prog(lines):
     return prog
 
 # Losses that will be used to train the model
-def getLossConfig():
-    loss_config = {
-        'cmd': 1.,
-        'cub_prm': 50.,
-
-        'xyz_prm': 50.,
-        'uv_prm': 50.,
-        'sym_prm': 50.,
-
-        'cub': 1.,
-        'sym_cub': 1.,
-        'sq_cub': 1.,
-
-        'leaf': 1.,
-        'bb': 50.,
-
-        'axis': 1.,
-        'face': 1.,
-        'align': 1.
-    }
-
-    return loss_config
+# def getLossConfig():
+#     loss_config = {
+#         'cmd': 1.,
+#         'cub_prm': 50.,
+#
+#         'xyz_prm': 50.,
+#         'uv_prm': 50.,
+#         'sym_prm': 50.,
+#
+#         'cub': 1.,
+#         'sym_cub': 1.,
+#         'sq_cub': 1.,
+#
+#         'leaf': 1.,
+#         'bb': 50.,
+#
+#         'axis': 1.,
+#         'face': 1.,
+#         'align': 1.
+#     }
+#
+#     return loss_config
 
 def get_partnet_data(dataset_path, category, max_shapes):
+    class PartNetDataset(torch.utils.data.Dataset):
+        def __init__(self, progs):
+            self.progs = progs
+            self.pcs = [get_train_pc(prog, num_samps) for (ind, prog) in self.progs]
+            self.prog_data = [progToData(prog) for (ind, prog) in self.progs]
+
+        def __getitem__(self, idx):
+            ind, prog = self.progs[idx]
+            prog_pc = self.pcs[idx].to(device)
+            nprog = self.prog_data[idx]
+            return (nprog, prog_pc, ind)
+
+        def __len__(self):
+            return len(self.progs)
+
     raw_indices, progs = load_progs(dataset_path, max_shapes)
 
     inds_and_progs = list(zip(raw_indices, progs))
@@ -105,58 +122,22 @@ def get_partnet_data(dataset_path, category, max_shapes):
 
     inds_and_progs = inds_and_progs[:max_shapes]
 
-    print('Converting progs to tensors')
-
-    samples = []
-    prog_lens = 0
-    num_children = 0
-    for ind, prog in inds_and_progs:
-        prog_lens += len(prog['prog'])
-        num_children += len(prog['children'])
-        # prog_pc = lines_to_pc(prog['prog'])
-        prog_pc = prog_to_pc(prog)
-        # prog['children'] = [{}] * len(prog['children'])
-        nprog = progToData(prog)
-        samples.append((nprog, prog_pc, ind))
-    print(f"AVERAGE PROG LENGTH: {prog_lens/len(inds_and_progs)}")
-    print(f"AVERAGE NUM CHILDREN: {num_children/len(inds_and_progs)}")
-
     train_ind_file = f'data_splits/{category}/train.txt'
     val_ind_file = f'data_splits/{category}/val.txt'
-
-    train_samples = []
-    val_samples = []
-
     train_inds = getInds(train_ind_file)
     val_inds = getInds(val_ind_file)
+    train_progs = [(ind, prog) for (ind, prog) in inds_and_progs if ind in train_inds]
+    val_progs = [(ind, prog) for (ind, prog) in inds_and_progs if ind in val_inds]
 
-    misses = 0.
-
-    for (prog, prog_pc, ind) in samples:
-        if ind in train_inds:
-            train_samples.append((prog, prog_pc, ind))
-        elif ind in val_inds:
-            val_samples.append((prog, prog_pc, ind))
-        else:
-            assert False, "idk what this is about"
-            # if keep_missing:
-            #     kept += 1
-            #     if random.random() < holdout_perc:
-            #         val_samples.append((prog, ind))
-            #     else:
-            #         train_samples.append((prog, ind))
-            # else:
-            #     misses += 1
-
-    train_num = len(train_samples)
-    val_num = len(val_samples)
+    train_num = len(train_progs)
+    val_num = len(val_progs)
     print(f"Training size: {train_num}")
     print(f"Validation size: {val_num}")
 
-    train_dataset = DataLoader(train_samples, batch_size, shuffle=True, collate_fn = _col)
-    eval_train_dataset = DataLoader(train_samples[:num_eval], batch_size=1, shuffle=False, collate_fn = _col)
-    val_dataset = DataLoader(val_samples, batch_size, shuffle = False, collate_fn = _col)
-    eval_val_dataset = DataLoader(val_samples[:num_eval], batch_size=1, shuffle = False, collate_fn = _col)
+    train_dataset = DataLoader(PartNetDataset(train_progs), batch_size, shuffle=True, collate_fn = _col)
+    eval_train_dataset = DataLoader(PartNetDataset(train_progs[:num_eval]), batch_size=1, shuffle=False, collate_fn = _col)
+    val_dataset = DataLoader(PartNetDataset(val_progs), batch_size, shuffle = False, collate_fn = _col)
+    eval_val_dataset = DataLoader(PartNetDataset(val_progs[:num_eval]), batch_size=1, shuffle = False, collate_fn = _col)
 
     return train_dataset, val_dataset, eval_train_dataset, eval_val_dataset
 
@@ -208,10 +189,6 @@ def print_eval_results(eval_results, name):
             eval_results['sym_cubc'] /= eval_results['ns']
             eval_results['axisc'] /= eval_results['ns']
 
-        if eval_results['np'] > 0:
-            eval_results['corr_line_num'] /= eval_results['np']
-            eval_results['bad_leaf'] /= eval_results['np']
-
         if eval_results['nsq'] > 0:
             eval_results['uv_prm'] /= eval_results['nsq']
             eval_results['sq_cubc'] /= eval_results['nsq']
@@ -231,7 +208,6 @@ def print_eval_results(eval_results, name):
         eval_results.pop('nsq')
         eval_results.pop('nl')
         eval_results.pop('count')
-        eval_results.pop('np')
         eval_results.pop('cub')
         eval_results.pop('sym_cub')
         eval_results.pop('axis')
@@ -281,8 +257,6 @@ def print_train_results(ep_result):
         ep_result['cmdc'] /= ep_result['nl']
     if ep_result['na'] > 0:
         ep_result['cubc'] /= ep_result['na']
-    if ep_result['nc'] > 0:
-        ep_result['cleaf'] /= ep_result['nc']
     if ep_result['nap'] > 0:
         ep_result['palignc'] /= ep_result['nap']
     if ep_result['nan'] > 0:
@@ -299,7 +273,6 @@ def print_train_results(ep_result):
     ep_result.pop('nc')
     ep_result.pop('nap')
     ep_result.pop('nan')
-    ep_result.pop('np')
     ep_result.pop('ns')
     ep_result.pop('nsq')
 
@@ -316,7 +289,6 @@ Squeeze Cub Loss = {ep_result['sq_cub']}
 Sym Cub Loss = {ep_result['sym_cub']}
 Sym Axis Loss = {ep_result['axis']}
 Face Loss = {ep_result['face']}
-Leaf Loss = {ep_result['leaf']}
 Align Loss = {ep_result['align']}
 KL Loss = {ep_result['kl'] if 'kl' in ep_result else None}
 BBox Loss = {ep_result['bb']}
@@ -324,7 +296,6 @@ Cmd Corr % {ep_result['cmdc']}
 Cub Corr % {ep_result['cubc']}
 Sq Cubb Corr % {ep_result['sq_cubc']}
 Face Corr % {ep_result['facec']}
-Leaf Corr % {ep_result['cleaf']}
 Align Pos Corr = {ep_result['palignc']}
 Align Neg Corr = {ep_result['nalignc']}
 Sym Cub Corr % {ep_result['sym_cubc']}
@@ -347,11 +318,8 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
         shape, points, ind = batch[0]
         named_results[f'count'] += 1.
 
-        points = points.to(device).unsqueeze(0)
-        encoding = encoder(points).unsqueeze(0)
-
         prog, shape_result = run_eval_decoder(
-            encoding, decoder, False, shape
+            points, encoder, decoder, False, shape
         )
 
         # print(prog['prog'])
@@ -374,7 +342,7 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
         recon_sets, outpath, exp_name, "train_dataset", epoch, True
     )
 
-    print(recon_results)
+    # print(recon_results)
 
     for key in recon_results:
         named_results[key] = recon_results[key]
@@ -387,10 +355,14 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
 
     return named_results
 
-train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair", "chair", 100)
+# random.seed(42)
+# np.random.seed(42)
+# torch.manual_seed(42)
+
+train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair", "chair", 10000)
 # train_dataset = get_random_data("random_data", 100)
 
-encoder = PCEncoder()
+encoder = PCEncoder(input_channels=4)
 encoder.to(device)
 decoder = FDGRU(hidden_dim)
 decoder.to(device)
@@ -429,8 +401,7 @@ loss_config = getLossConfig()
 
 print('training ...')
 
-for epoch in range(100000):
-    print(epoch)
+for epoch in range(100):
     decoder.train()
     encoder.train()
     ep_result = {}
@@ -438,10 +409,8 @@ for epoch in range(100000):
     for batch in train_dataset:
         bc += 1.
         shape, points, ind = batch[0]
-        points = points.to(device).unsqueeze(0)
-        encoding = encoder(points).unsqueeze(0)
         shape_result = run_train_decoder(
-            shape, encoding, decoder
+            shape, points, encoder, decoder
         )
         loss = 0.
         if len(shape_result) > 0:
@@ -473,6 +442,7 @@ for epoch in range(100000):
             print_eval_results(eval_results, "val")
             eval_results = model_eval(eval_train_dataset, encoder, decoder, "train_out", "0", epoch)
             print_eval_results(eval_results, "train")
+        del eval_results, ep_result
 
 
     dec_sch.step()

@@ -64,7 +64,10 @@ class PCEncoder(nn.Module):
                 Each point in the point-cloud MUST
                 be formated as (x, y, z, features...)
         """
-        xyz = pointcloud.contiguous()
+        # xyz = pointcloud.contiguous()
+        # features = pointcloud.transpose(1, 2).contiguous()
+        pointcloud = pointcloud.permute(0, 2, 1)
+        xyz = pointcloud[:, :, :3].contiguous()
         features = pointcloud.transpose(1, 2).contiguous()
 
         for module in self.SA_modules:
@@ -77,6 +80,6 @@ class PCEncoder(nn.Module):
 
 if __name__ == '__main__':
     device = torch.device('cuda')
-    a = torch.randn(10,10000,3).to(device)
-    enc = PCEncoder().to(device)
+    a = torch.randn(10,10000,4).to(device)
+    enc = PCEncoder(input_channels=4).to(device)
     print(enc(a).shape)

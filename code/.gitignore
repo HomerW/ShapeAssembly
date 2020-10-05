@@ -5,3 +5,4 @@ model_output/*
 train_out
 Pointnet2_PyTorch
 *.out
+parse_flat_chair
