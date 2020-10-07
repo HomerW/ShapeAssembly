@@ -373,11 +373,11 @@ def progToData(prog):
         return {}
 
     inp, tar, weights, bb_dims = progToTarget(prog["prog"])
-    prog["inp"] = inp.unsqueeze(1).to(device)
-    prog["tar"] = tar.unsqueeze(1).to(device)
-    prog["weights"] = weights.to(device)
+    prog["inp"] = inp.unsqueeze(1).cpu()
+    prog["tar"] = tar.unsqueeze(1).cpu()
+    prog["weights"] = weights.cpu()
     prog["children"] = [progToData(c) for c in prog["children"]]
-    prog["bb_dims"] = bb_dims.to(device)
+    prog["bb_dims"] = bb_dims.cpu()
 
     return prog
 

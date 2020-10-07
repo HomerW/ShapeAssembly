@@ -18,14 +18,15 @@ from tqdm import tqdm
 import ast
 import metrics
 from pointnet_fixed import PointNetEncoder as PCEncoder
+# from pc_encoder import PCEncoder
 from model_prog import FDGRU, load_progs, progToData, getInds, _col, \
                                 run_train_decoder, run_eval_decoder
 from ShapeAssembly import hier_execute, Program
 
-num_samps = 5000
+num_samps = 10000
 hidden_dim = 1024
 batch_size = 1
-num_eval = 10
+num_eval = 50
 ADAM_EPS = 1e-6
 dec_lr = 0.0001
 enc_lr = 0.0001
@@ -371,10 +372,8 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
 
     # For reconstruction, get metric performance
     recon_results, recon_misses = metrics.recon_metrics(
-        recon_sets, outpath, exp_name, "train_dataset", epoch, True
+        recon_sets, outpath, exp_name, "generated", epoch, True
     )
-
-    print(recon_results)
 
     for key in recon_results:
         named_results[key] = recon_results[key]
@@ -387,7 +386,7 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
 
     return named_results
 
-train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair", "chair", 100)
+train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10000)
 # train_dataset = get_random_data("random_data", 100)
 
 encoder = PCEncoder()
@@ -429,8 +428,7 @@ loss_config = getLossConfig()
 
 print('training ...')
 
-for epoch in range(100000):
-    print(epoch)
+for epoch in range(100):
     decoder.train()
     encoder.train()
     ep_result = {}
@@ -469,10 +467,12 @@ for epoch in range(100000):
     if (epoch + 1) % 10 == 0:
         print_train_results(ep_result)
         with torch.no_grad():
-            eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "0", epoch)
+            eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", epoch)
             print_eval_results(eval_results, "val")
-            eval_results = model_eval(eval_train_dataset, encoder, decoder, "train_out", "0", epoch)
+            eval_results = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch)
             print_eval_results(eval_results, "train")
+        torch.save(encoder.state_dict(), "train_out/encoder.pt")
+        torch.save(decoder.state_dict(), "train_out/decoder.pt")
 
 
     dec_sch.step()

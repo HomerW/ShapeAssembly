@@ -3,6 +3,8 @@
 *.pt
 model_output/*
 train_out
+train_out2
+train_backup
 Pointnet2_PyTorch
 *.out
-parse_flat_chair
+program_fit

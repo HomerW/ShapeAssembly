@@ -66,16 +66,16 @@ class PCEncoder(nn.Module):
         """
         # xyz = pointcloud.contiguous()
         # features = pointcloud.transpose(1, 2).contiguous()
-        pointcloud = pointcloud.permute(0, 2, 1)
+        # pointcloud = pointcloud.permute(0, 2, 1)
         xyz = pointcloud[:, :, :3].contiguous()
         features = pointcloud.transpose(1, 2).contiguous()
 
         for module in self.SA_modules:
             xyz, features = module(xyz, features)
 
-        return features.squeeze(-1)
+        # return features.squeeze(-1)
 
-        # return self.FC_layer(features.squeeze(-1))
+        return self.FC_layer(features.squeeze(-1))
 
 
 if __name__ == '__main__':

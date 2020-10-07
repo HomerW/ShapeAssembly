@@ -25,7 +25,7 @@ from ShapeAssembly import hier_execute, Program
 from reencode import get_train_pc
 
 num_samps = 5000
-hidden_dim = 1024
+hidden_dim = 256
 batch_size = 1
 num_eval = 10
 ADAM_EPS = 1e-6
@@ -99,17 +99,28 @@ def lines_to_prog(lines):
 #
 #     return loss_config
 
+def prog_to_gpu(prog):
+    if len(prog) == 0:
+        return prog
+    prog["inp"] = prog["inp"].to(device)
+    prog["tar"] = prog["tar"].to(device)
+    prog["weights"] = prog["weights"].to(device)
+    prog["bb_dims"] = prog["bb_dims"].to(device)
+    for c in prog["children"]:
+        prog_to_gpu(c)
+    return prog
+
 def get_partnet_data(dataset_path, category, max_shapes):
     class PartNetDataset(torch.utils.data.Dataset):
         def __init__(self, progs):
             self.progs = progs
-            self.pcs = [get_train_pc(prog, num_samps) for (ind, prog) in self.progs]
+            self.pcs = [get_train_pc(prog, num_samps).cpu() for (ind, prog) in self.progs]
             self.prog_data = [progToData(prog) for (ind, prog) in self.progs]
 
         def __getitem__(self, idx):
             ind, prog = self.progs[idx]
             prog_pc = self.pcs[idx].to(device)
-            nprog = self.prog_data[idx]
+            nprog = prog_to_gpu(self.prog_data[idx])
             return (nprog, prog_pc, ind)
 
         def __len__(self):
@@ -355,9 +366,9 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch):
 
     return named_results
 
-# random.seed(42)
-# np.random.seed(42)
-# torch.manual_seed(42)
+random.seed(42)
+np.random.seed(42)
+torch.manual_seed(42)
 
 train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair", "chair", 10000)
 # train_dataset = get_random_data("random_data", 100)
