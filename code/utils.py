@@ -4,6 +4,7 @@ import numpy as np
 import generate as gen
 import ShapeAssembly as ex
 from copy import deepcopy
+from pathlib import Path
 
 MAX_CUBES = 10
 PREC = 4
@@ -52,8 +53,8 @@ def orientProps(center, xd, yd, zd, xdir, ydir, zdir):
         (xdir, xd, 0),
         (ydir, yd, 1),
         (zdir, zd, 2),
-        (-1 * xdir, xd, 3),                
-        (-1 * ydir, yd, 4),        
+        (-1 * xdir, xd, 3),
+        (-1 * ydir, yd, 4),
         (-1 * zdir, zd, 5)
     ]
 
@@ -61,29 +62,29 @@ def orientProps(center, xd, yd, zd, xdir, ydir, zdir):
 
     if rind >= 3:
         l.pop(rind)
-        l.pop((rind+3)%6)    
+        l.pop((rind+3)%6)
     else:
-        l.pop((rind+3)%6)    
+        l.pop((rind+3)%6)
         l.pop(rind)
-        
+
     for i in range(0, 4):
         p_ind = l[i][2]
         if p_ind > max(rind, (rind+3)%6):
             l[i] = (l[i][0], l[i][1], l[i][2] - 2)
         elif p_ind > min(rind, (rind+3)%6):
             l[i] = (l[i][0], l[i][1], l[i][2] - 1)
-                
+
     updir, upd, upind = sorted(deepcopy(l), key=lambda x: vector_cos(up, x[0]))[-1]
 
-    if upind >= 2:    
+    if upind >= 2:
         l.pop(upind)
-        l.pop((upind+2)%4)    
+        l.pop((upind+2)%4)
     else:
-        l.pop((upind+2)%4)    
+        l.pop((upind+2)%4)
         l.pop(upind)
-        
+
     fwdir, fwd, _ = sorted(l, key=lambda x: vector_cos(fwd, x[0]))[-1]
-        
+
     return {
         'center': torch.tensor(center).float(),
         'xd': torch.tensor(rtd).float(),
@@ -103,26 +104,26 @@ def locallyClean(prog):
                 switches.append((
                     f'cube{cube_count}', line.split()[0]
                 ))
-            
+
             cube_count += 1
-            
+
     for a, b in switches:
         prog = [line.replace(b,a) for line in prog]
 
     clines = []
-    
+
     P = ex.Program()
     for line in prog:
         if "Cuboid(" in line:
             parse = P.parseCuboid(line)
-            name = parse[0]                                
+            name = parse[0]
             x = float(max(parse[1].item(), 0.01))
             y = float(max(parse[2].item(), 0.01))
             z = float(max(parse[3].item(), 0.01))
             aligned = str(parse[4])
             clines.append("\t" + gen.assign(
-                name, gen.make_function('Cuboid', [x,y,z,aligned])))            
-            
+                name, gen.make_function('Cuboid', [x,y,z,aligned])))
+
         if "attach(" in line:
             parse = P.parseAttach(line)
             clines.append("\t" + gen.make_function(
@@ -138,7 +139,7 @@ def locallyClean(prog):
                 "squeeze",
                 [parse[0], parse[1], parse[2], parse[3]] + [max(min(co, 1.0), 0.0) for co in parse[4:]]
             ))
-            
+
         if "reflect(" in line:
             parse = P.parseReflect(line)
             clines.append("\t" + gen.make_function(
@@ -157,10 +158,10 @@ def locallyClean(prog):
                     float(min(max(parse[3], 0.0), 1.0))
                 ]
             ))
-            
-                
+
+
     return clines
-            
+
 def fillHP(name, progs, children):
     hp = {'name': name}
     hp['prog'] = locallyClean(progs[name])
@@ -176,25 +177,25 @@ def loadHPFromFile(progfile):
 
     progs = {}
     children = {}
-    
+
     prog_num = -1
     cur_prog = []
     cur_children = []
-    
+
     with open(progfile) as f:
         for line in f:
             ls = line.split()
-            
+
             if ls[0] == 'Assembly':
                 prog_num = int(ls[1].split('_')[1])
 
             elif ls[0] == '}':
-                
+
                 progs[prog_num] = cur_prog
                 children[prog_num] = cur_children
                 cur_prog = []
                 cur_children = []
-                
+
             elif 'Cuboid' in line:
                 if 'Program_' in line:
                     cur_children.append(int(ls[0].split('_')[1]))
@@ -214,7 +215,7 @@ def loadHPFromFile(progfile):
 
             elif 'squeeze' in line:
                 cur_prog.append(line[1:-1])
-                
+
     return fillHP(0, progs, children)
 
 
@@ -227,26 +228,26 @@ def locallyNormClean(prog, max_val):
                 switches.append((
                     f'cube{cube_count}', line.split()[0]
                 ))
-            
+
             cube_count += 1
-            
+
     for a, b in switches:
         prog = [line.replace(b,a) for line in prog]
 
     clines = []
-    
+
     P = ex.Program()
     for line in prog:
         if "Cuboid(" in line:
             parse = P.parseCuboid(line)
-            name = parse[0]                                
+            name = parse[0]
             x = float(min(max(parse[1].item() / max_val, 0.01), 1.0))
             y = float(min(max(parse[2].item() / max_val, 0.01), 1.0))
             z = float(min(max(parse[3].item() / max_val, 0.01), 1.0))
 
             clines.append("\t" + gen.assign(
-                name, gen.make_function('Cuboid', [x,y,z])))            
-            
+                name, gen.make_function('Cuboid', [x,y,z])))
+
         if "attach(" in line:
             parse = P.parseAttach(line)
             clines.append("\t" + gen.make_function(
@@ -274,9 +275,9 @@ def locallyNormClean(prog, max_val):
                     float(min(max(parse[3], 0.0), 1.0))
                 ]
             ))
-                
+
     return clines
-            
+
 def fillNormHP(name, progs, children, max_val = None):
     hp = {'name': name}
     if max_val is None:
@@ -294,25 +295,25 @@ def loadNormHPFromFile(progfile):
 
     progs = {}
     children = {}
-    
+
     prog_num = -1
     cur_prog = []
     cur_children = []
-    
+
     with open(progfile) as f:
         for line in f:
             ls = line.split()
-            
+
             if ls[0] == 'Assembly':
                 prog_num = int(ls[1].split('_')[1])
 
             elif ls[0] == '}':
-                
+
                 progs[prog_num] = cur_prog
                 children[prog_num] = cur_children
                 cur_prog = []
                 cur_children = []
-                
+
             elif 'Cuboid' in line:
                 if 'Program_' in line:
                     cur_children.append(int(ls[0].split('_')[1]))
@@ -329,9 +330,9 @@ def loadNormHPFromFile(progfile):
 
             elif 'translate' in line:
                 cur_prog.append(line[1:-1])
-                
+
     return fillNormHP(0, progs, children)
-                
+
 def getHierProgLines(root):
     prog_count = 0
     root["prog_num"] = prog_count
@@ -341,16 +342,16 @@ def getHierProgLines(root):
     while(len(q) > 0):
 
         node = q.pop(0)
-        
-        lines.append(f"Assembly Program_{node['prog_num']}" +" {")    
+
+        lines.append(f"Assembly Program_{node['prog_num']}" +" {")
 
         NAME_DICT = {}
-        
+
         c = 0
         for line in node["prog"]:
             if "Cuboid(" in line:
                 parse = P.parseCuboid(line)
-                if len(node["children"][c]) > 0:                
+                if len(node["children"][c]) > 0:
                     prog_count += 1
                     name = f"Program_{prog_count}"
                     node["children"][c]["prog_num"] = prog_count
@@ -358,16 +359,16 @@ def getHierProgLines(root):
                     name = parse[0]
 
                 NAME_DICT[parse[0]] = name
-                    
+
                 x = round(float(parse[1]), PREC)
                 y = round(float(parse[2]), PREC)
                 z = round(float(parse[3]), PREC)
                 aligned = str(parse[4])
                 lines.append("\t" + gen.assign(
                     name, gen.make_function('Cuboid', [x,y,z,aligned]))
-                )               
+                )
                 c += 1
-            
+
             if "attach(" in line:
                 parse = P.parseAttach(line)
                 lines.append("\t" + gen.make_function(
@@ -402,17 +403,20 @@ def getHierProgLines(root):
                     "squeeze",
                     [NAME_DICT[parse[0]], NAME_DICT[parse[1]], NAME_DICT[parse[2]], parse[3]] + [round(co, PREC) for co in parse[4:]]
                 ))
-        
+
         lines.append("}")
-        
+
         for c in node["children"]:
             if c is not None and len(c) > 0:
                 if "prog_num" in c:
                     q.append(c)
 
-    return lines            
+    return lines
 
 def writeHierProg(hier_prog, outfile):
+    outpath = outfile.split("/")
+    outpath = "/".join(outpath[:-1])
+    Path(outpath).mkdir(parents=True, exist_ok=True)
     lines = getHierProgLines(hier_prog)
     with open(outfile, 'w') as f:
         for line in lines:
@@ -424,8 +428,11 @@ def log_print(s, of):
         f.write(f"{s}\n")
     print(s)
 
-    
+
 def writeObj(verts, faces, outfile):
+    outpath = outfile.split("/")
+    outpath = "/".join(outpath[:-1])
+    Path(outpath).mkdir(parents=True, exist_ok=True)
     faces = faces.clone()
     faces += 1
     with open(outfile, 'w') as f:

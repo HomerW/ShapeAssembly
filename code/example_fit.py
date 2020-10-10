@@ -1,8 +1,8 @@
 import sys
 import torch
-from utils import sample_surface, writePC, writeHierProg
+from utils import sample_surface, writePC, writeHierProg, loadObj
 from losses import ChamferLoss
-from ShapeAssembly import ShapeAssembly, writeObj, make_hier_prog
+from ShapeAssembly import ShapeAssembly, writeObj, make_hier_prog, hier_execute
 import os
 import metrics
 
@@ -40,13 +40,17 @@ def fit(prog_path, obj_path, out_path):
     progs = os.listdir(prog_path)
     objs = os.listdir(obj_path)
     fitted_progs = []
-    for prg in progs:
+    for i, prg in enumerate(progs):
+        print(f"fitting program {i}")
         sa = ShapeAssembly()
         p_no_e = prg.split("_")[1]
         index = int(p_no_e.split(".")[0])
 
         # should be shape N x 3
-        target_pc = load_point_cloud(f"{obj_path}/{index}.obj")
+        tverts, tfaces = loadObj(f"{obj_path}/{index}.obj")
+
+        tverts = torch.tensor(tverts)
+        tfaces = torch.tensor(tfaces).long()
 
         out_file = f"{out_path}/{index}"
         with open(f"{prog_path}/{prg}") as file:
@@ -58,13 +62,13 @@ def fit(prog_path, obj_path, out_path):
         start = torch.cat(param_list).clone()
 
         for iter in range(400):
-            print(iter)
             verts, faces = sa.diff_run(hier, param_dict)
 
             samps = sample_surface(faces, verts.unsqueeze(0), 10000)
+            tsamps = sample_surface(tfaces, tverts.unsqueeze(0), 10000)
             closs = cham_loss(
                 samps.squeeze().T.unsqueeze(0).cuda(),
-                target_pc.T.unsqueeze(0).cuda(),
+                tsamps.squeeze().T.unsqueeze(0).cuda(),
                 0.0
             )
 
@@ -76,8 +80,29 @@ def fit(prog_path, obj_path, out_path):
             loss.backward()
             opt.step()
 
+
+        # # prevent cuboids from having 0 dimensions
+        new_param_dict = {}
+        for p in param_dict:
+            new_p = []
+            for param in param_dict[p]:
+                if param[0] == "Cuboid":
+                    new_attrs = []
+                    for attr in param[1]:
+                        if torch.is_tensor(attr):
+                            new_attr = torch.clamp(attr, min=0.01).detach()
+                            new_attrs.append(new_attr)
+                        else:
+                            new_attrs.append(attr)
+                    new_p.append((param[0], new_attrs))
+                else:
+                    new_p.append(param)
+            new_param_dict[p] = new_p
+
+        sa.fill_hier(hier, new_param_dict)
+        verts, faces = hier_execute(hier)
+
         writeObj(verts, faces, out_file + '.obj')
-        sa.fill_hier(hier, param_dict)
         writeHierProg(hier, out_file + '.txt')
 
         fitted_progs.append((hier, index))
@@ -91,7 +116,7 @@ if __name__ == '__main__':
     gt_prog_dicts = {}
 
     recon_sets = []
-    for p in progs[:10]:
+    for p in progs:
         sa = ShapeAssembly()
         p_no_e = p.split("_")[1]
         index = int(p_no_e.split(".")[0])

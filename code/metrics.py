@@ -12,6 +12,7 @@ from valid import check_stability, check_rooted
 from pointnet_classification import eval_get_var
 from tqdm import tqdm
 import losses
+from pathlib import Path
 
 device = torch.device("cuda")
 fscore = losses.FScore(device)
@@ -46,12 +47,12 @@ def getShapeIoU(cubes, gt_cubes, bbox):
 
     for col in gt_cubes:
         flat_gt_cubes  += col
-    
+
     pvoxels = shape_voxelize(flat_cubes, bbox)
     tvoxels = shape_voxelize(flat_gt_cubes, bbox)
     pinter = ((tvoxels + pvoxels) == 2.).nonzero().shape[0]
     punion = ((tvoxels + pvoxels) > 0.).nonzero().shape[0]
-    
+
     return (pinter * 100.0) / punion
 
 
@@ -83,31 +84,31 @@ def param_dist(cube1, cube2, bbox):
     ydir_diff = .5 - (cube1['ydir'].dot(cube2['ydir']) / 2)
     zdir_diff = .5 - (cube1['zdir'].dot(cube2['zdir']) / 2)
     return c_diff + xd_diff + yd_diff + zd_diff + xdir_diff + ydir_diff + zdir_diff
-    
+
 def getParamDist(cubes, gt_cubes, bbox):
     tv = getTotalVol(gt_cubes)
 
     metric = 0.
 
     def_cube = getDefCube()
-    
+
     for i, gt_col in enumerate(gt_cubes):
         col = None
         if i < len(cubes):
             col = cubes[i]
-        
-        for j in range(len(gt_col)):            
+
+        for j in range(len(gt_col)):
             if col is not None and j < len(col):
-                pd = param_dist(gt_col[j], col[j], bbox)                
+                pd = param_dist(gt_col[j], col[j], bbox)
             else:
                 pd = param_dist(gt_col[j], def_cube, bbox)
 
             vol = gt_col[j]['xd'] * gt_col[j]['yd'] * gt_col[j]['zd']
 
             metric += pd * (vol/tv)
-            
+
     return metric
-    
+
 def getBBox(gt_prog):
     P = ex.Program()
     bbox_line = P.parseCuboid(gt_prog['prog'][0])
@@ -120,7 +121,7 @@ def getBBox(gt_prog):
     bbox['yd'] = bbox_line[2].to(device)
     bbox['zd'] = bbox_line[3].to(device)
     return bbox
-    
+
 
 def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
     misses = 0.
@@ -129,19 +130,19 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
         'iou_shape': [],
         'param_dist_parts': [],
     }
-        
-    for prog, gt_prog, prog_ind in recon_sets:    
+
+    for prog, gt_prog, prog_ind in recon_sets:
 
         bbox = getBBox(gt_prog)
-        
+
         gt_verts, gt_faces, gt_hscene = hier_execute(gt_prog, return_all = True)
 
         gt_cubes = [[CuboidToParams(c) for c in scene] for scene in gt_hscene]
-        
+
         try:
             verts, faces, hscene = hier_execute(prog, return_all = True)
             cubes = [[CuboidToParams(c) for c in scene] for scene in hscene]
-            
+
             assert not torch.isnan(verts).any(), 'saw nan vert'
 
         except Exception as e:
@@ -154,9 +155,10 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
         gt_verts = gt_verts.to(device)
         faces = faces.to(device)
         gt_faces = gt_faces.to(device)
-        
+
+        Path(f"{outpath}/{exp_name}/objs/gt/").mkdir(parents=True, exist_ok=True)
         gt_objs = os.listdir(f"{outpath}/{exp_name}/objs/gt/")
-        
+
         if f"{prog_ind}.obj" not in gt_objs:
             utils.writeObj(gt_verts, gt_faces, f"{outpath}/{exp_name}/objs/gt/{prog_ind}.obj")
             utils.writeHierProg(gt_prog, f"{outpath}/{exp_name}/programs/gt/{prog_ind}.txt")
@@ -168,7 +170,7 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
             utils.writeHierProg(
                 prog, f"{outpath}/{exp_name}/programs/{name}/{epoch}_{prog_ind}.txt"
             )
-            
+
         except Exception as e:
             print(f"Failed writing prog/obj for {prog_ind} with {e}")
 
@@ -178,7 +180,7 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
                 results['fscores'].append(fs)
         except Exception as e:
             if VERBOSE:
-                print(f"failed Fscore for {prog_ind} with {e}")                
+                print(f"failed Fscore for {prog_ind} with {e}")
 
         try:
             siou = getShapeIoU(cubes, gt_cubes, bbox)
@@ -187,7 +189,7 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
         except Exception as e:
             if VERBOSE:
                 print(f"failed Shape Iou for {prog_ind} with {e}")
-        
+
 
         try:
             pd = getParamDist(cubes, gt_cubes, bbox)
@@ -205,22 +207,22 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
             res = 0.
 
         results[key] = res
-        
+
     return results, misses
-        
+
 def gen_metrics(gen_progs, outpath, exp_name, epoch, VERBOSE, write_progs = True):
     misses = 0.
     results = {
-        'num_parts': [],        
+        'num_parts': [],
         'rootedness': [],
-        'stability': [],                
+        'stability': [],
     }
 
     samples = []
-    
+
     for i, prog in enumerate(gen_progs):
         try:
-            verts, faces = hier_execute(prog)            
+            verts, faces = hier_execute(prog)
             assert not torch.isnan(verts).any(), 'saw nan vert'
             if write_progs:
                 utils.writeObj(verts, faces, f"{outpath}/{exp_name}/objs/gen/{epoch}_{i}.obj")
@@ -228,7 +230,7 @@ def gen_metrics(gen_progs, outpath, exp_name, epoch, VERBOSE, write_progs = True
 
             results['num_parts'].append(verts.shape[0] / 8.0)
             samples.append((verts, faces))
-            
+
         except Exception as e:
             misses += 1.
             if VERBOSE:
@@ -249,7 +251,7 @@ def gen_metrics(gen_progs, outpath, exp_name, epoch, VERBOSE, write_progs = True
         except Exception as e:
             if VERBOSE:
                 print(f"failed rooted/stable with {e}")
-                
+
     for key in results:
         if len(results[key]) > 0:
             res = torch.tensor(results[key]).mean().item()
@@ -264,7 +266,7 @@ def gen_metrics(gen_progs, outpath, exp_name, epoch, VERBOSE, write_progs = True
         results['variance'] = 0.
         if VERBOSE:
             print(f"failed getting variance with {e}")
-        
+
     return results, misses
 
 
@@ -275,31 +277,31 @@ def calc_tab3():
 
     if len(sys.argv) > 2:
         inds = inds[:int(sys.argv[2])]
-    
+
     for ind in tqdm(inds):
         if '.txt' in ind:
             hp = utils.loadHPFromFile(f'{ddir}/{ind}')
-            verts, faces = hier_execute(hp)            
+            verts, faces = hier_execute(hp)
         else:
             verts, faces = utils.loadObj(f'{ddir}/{ind}')
             verts = torch.tensor(verts)
             faces = torch.tensor(faces)
         outs.append((verts, faces))
-        
+
     misses = 0.
     results = {
-        'num_parts': [],        
+        'num_parts': [],
         'rootedness': [],
-        'stability': [],                
+        'stability': [],
     }
 
     samples = []
-    
-    for (verts, faces) in tqdm(outs):        
-        
+
+    for (verts, faces) in tqdm(outs):
+
         results['num_parts'].append(verts.shape[0] / 8.0)
         samples.append((verts, faces))
-            
+
 
         if check_rooted(verts, faces):
             results['rootedness'].append(1.)
@@ -310,7 +312,7 @@ def calc_tab3():
             results['stability'].append(1.)
         else:
             results['stability'].append(0.)
-                
+
     for key in results:
         if len(results[key]) > 0:
             res = torch.tensor(results[key]).mean().item()
@@ -319,7 +321,7 @@ def calc_tab3():
 
         results[key] = res
 
-    
+
     results['variance'] = eval_get_var(samples)
 
     for key in results:
@@ -339,4 +341,3 @@ if __name__ == '__main__':
     #utils.writeObj(verts, faces, 'test.obj')
     #print(check_rooted(verts, faces))
     #print(check_stability(verts, faces, True))
-

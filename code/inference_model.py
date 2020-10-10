@@ -428,7 +428,7 @@ loss_config = getLossConfig()
 
 print('training ...')
 
-for epoch in range(100):
+for epoch in range(100000):
     decoder.train()
     encoder.train()
     ep_result = {}

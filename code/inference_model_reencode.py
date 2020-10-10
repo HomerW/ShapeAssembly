@@ -17,17 +17,17 @@ import argparse
 from tqdm import tqdm
 import ast
 import metrics
-# from pointnet_fixed_reencode import PointNetEncoder as PCEncoder
-from pc_encoder import PCEncoder
+from pointnet_fixed_reencode import PointNetEncoder as PCEncoder
+# from pc_encoder import PCEncoder
 from model_prog_reencode import FDGRU, load_progs, progToData, getInds, _col, \
                                 run_train_decoder, run_eval_decoder, getLossConfig
 from ShapeAssembly import hier_execute, Program
 from reencode import get_train_pc
 
-num_samps = 5000
+num_samps = 10000
 hidden_dim = 256
 batch_size = 1
-num_eval = 10
+num_eval = 50
 ADAM_EPS = 1e-6
 dec_lr = 0.0001
 enc_lr = 0.0001
@@ -370,10 +370,10 @@ random.seed(42)
 np.random.seed(42)
 torch.manual_seed(42)
 
-train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair", "chair", 10000)
+train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("parse_flat_chair/reorder", "chair", 10000)
 # train_dataset = get_random_data("random_data", 100)
 
-encoder = PCEncoder(input_channels=4)
+encoder = PCEncoder()
 encoder.to(device)
 decoder = FDGRU(hidden_dim)
 decoder.to(device)
@@ -412,7 +412,7 @@ loss_config = getLossConfig()
 
 print('training ...')
 
-for epoch in range(100):
+for epoch in range(100000):
     decoder.train()
     encoder.train()
     ep_result = {}
@@ -453,7 +453,8 @@ for epoch in range(100):
             print_eval_results(eval_results, "val")
             eval_results = model_eval(eval_train_dataset, encoder, decoder, "train_out", "0", epoch)
             print_eval_results(eval_results, "train")
-        del eval_results, ep_result
+        torch.save(encoder.state_dict(), "train_out/encoder.pt")
+        torch.save(decoder.state_dict(), "train_out/decoder.pt")
 
 
     dec_sch.step()

@@ -115,8 +115,8 @@ class PointNetEncoder(nn.Module):
 
     def forward(self, x):
         x = self.feat(x)[0]
-        # x = F.relu(self.fc1(x))
-        # x = F.relu(self.fc2(x))
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
         return x
 
 
