@@ -13,6 +13,7 @@ from pointnet_classification import eval_get_var
 from tqdm import tqdm
 import losses
 from pathlib import Path
+import pickle
 
 device = torch.device("cuda")
 fscore = losses.FScore(device)
@@ -130,6 +131,7 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
         'iou_shape': [],
         'param_dist_parts': [],
     }
+    fs_write = {}
 
     for prog, gt_prog, prog_ind in recon_sets:
 
@@ -178,6 +180,7 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
             fs = getFScore(verts, faces, gt_verts, gt_faces)
             if fs is not None:
                 results['fscores'].append(fs)
+                fs_write[prog_ind] = fs
         except Exception as e:
             if VERBOSE:
                 print(f"failed Fscore for {prog_ind} with {e}")
@@ -199,6 +202,9 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
             if VERBOSE:
                 print(f"failed param dist for {prog_ind} with {e}")
 
+
+    with open(f"{outpath}/{exp_name}/fs_data", "wb") as file:
+        file.write(pickle.dumps(fs_write))
 
     for key in results:
         if len(results[key]) > 0:

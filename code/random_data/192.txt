@@ -1,0 +1,11 @@
+Assembly Program_0 {
+ bbox = Cuboid(1.0, 1.0, 1.0, True)
+ cube0 = Cuboid(0.393, 0.325, 0.184, False)
+ cube1 = Cuboid(0.223, 0.193, 0.109, False)
+ cube2 = Cuboid(0.07, 0.095, 0.232, True)
+ cube3 = Cuboid(0.112, 0.276, 0.099, True)
+ attach(cube0, bbox, 0.015, 0.0, 0.045, 0.127, 0.0, 0.147)
+ attach(cube1, bbox, 0.568, 0.0, 0.096, 0.608, 0.0, 0.666)
+ attach(cube2, bbox, 0.806, 0.0, 0.473, 0.694, 0.0, 0.421)
+ attach(cube3, bbox, 0.791, 0.0, 0.08, 0.841, 0.0, 0.544)
+}

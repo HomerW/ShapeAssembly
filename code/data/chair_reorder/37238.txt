@@ -1,0 +1,52 @@
+Assembly Program_0 {
+	bbox = Cuboid(0.731, 1.574, 0.979, True)
+	Program_1 = Cuboid(0.634, 0.681, 0.713, True)
+	attach(Program_1, bbox, 0.5, 0.0, 0.5, 0.502, 0.004, 0.586)
+	Program_2 = Cuboid(0.627, 0.925, 0.122, False)
+	squeeze(Program_2, bbox, Program_1, top, 0.507, 0.062)
+	Program_3 = Cuboid(0.731, 0.151, 0.699, True)
+	attach(Program_3, Program_1, 0.501, 0.753, 0.436, 0.5, 1.0, 0.5)
+}
+Assembly Program_1 {
+	bbox = Cuboid(0.634, 0.681, 0.713, True)
+	cube0 = Cuboid(0.049, 0.659, 0.087, True)
+	squeeze(cube0, bbox, bbox, top, 0.05, 0.065)
+	cube1 = Cuboid(0.083, 0.627, 0.083, True)
+	attach(cube1, bbox, 0.5, 0.0, 0.5, 0.066, 0.018, 0.942)
+	reflect(cube0, X)
+	reflect(cube1, X)
+}
+Assembly Program_2 {
+	bbox = Cuboid(0.627, 0.925, 0.122, True)
+	cube0 = Cuboid(0.049, 0.925, 0.106, True)
+	squeeze(cube0, bbox, bbox, top, 0.039, 0.567)
+	cube2 = Cuboid(0.531, 0.117, 0.058, False)
+	attach(cube2, bbox, 0.5, 1.0, 0.5, 0.5, 0.985, 0.241)
+	attach(cube2, cube0, 0.0, 0.5, 0.5, 0.972, 0.923, 0.234)
+	cube1 = Cuboid(0.531, 0.117, 0.058, True)
+	attach(cube1, cube0, 0.0, 0.5, 0.5, 0.972, 0.379, 0.57)
+	reflect(cube0, X)
+	reflect(cube1, Y)
+}
+Assembly Program_3 {
+	bbox = Cuboid(0.731, 0.151, 0.699, True)
+	cube0 = Cuboid(0.656, 0.088, 0.636, True)
+	attach(cube0, bbox, 0.5, 1.0, 0.5, 0.501, 1.0, 0.492)
+	Program_4 = Cuboid(0.229, 0.073, 0.699, True)
+	squeeze(Program_4, bbox, cube0, bot, 0.161, 0.499)
+	cube2 = Cuboid(0.531, 0.073, 0.029, True)
+	attach(cube2, bbox, 0.5, 0.0, 0.5, 0.507, 0.0, 0.021)
+	cube3 = Cuboid(0.318, 0.063, 0.029, True)
+	squeeze(cube3, bbox, cube0, bot, 0.501, 0.905)
+	attach(cube2, cube0, 0.503, 0.928, 0.95, 0.509, 0.051, 0.003)
+	reflect(Program_4, X)
+}
+Assembly Program_4 {
+	bbox = Cuboid(0.229, 0.073, 0.699, True)
+	cube0 = Cuboid(0.029, 0.063, 0.463, True)
+	attach(cube0, bbox, 0.5, 0.0, 0.5, 0.32, 0.0, 0.376)
+	cube1 = Cuboid(0.14, 0.073, 0.106, False)
+	squeeze(cube1, bbox, bbox, top, 0.657, 0.093)
+	cube2 = Cuboid(0.107, 0.073, 0.216, False)
+	squeeze(cube2, bbox, bbox, top, 0.5, 0.837)
+}

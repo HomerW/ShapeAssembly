@@ -14,7 +14,7 @@ def create_point_cloud(in_file, out_file):
     verts, faces = sa.diff_run(hier, param_dict)
     tsamps = sample_surface(faces, verts.unsqueeze(0), 10000).squeeze()
     writePC(tsamps, out_file)
-    
+
 def load_point_cloud(pc_file):
     pc = []
     with open(pc_file) as f:
@@ -32,7 +32,7 @@ def load_point_cloud(pc_file):
                     0.0
                 ])
     return torch.tensor(pc)
-    
+
 
 def main():
     sa = ShapeAssembly()
@@ -43,17 +43,17 @@ def main():
 
     tverts = torch.tensor(tverts)
     tfaces = torch.tensor(tfaces).long()
-    
+
     out_file = sys.argv[3]
     hier, param_dict, param_list = sa.make_hier_param_dict(lines)
 
     opt = torch.optim.Adam(param_list, 0.001)
 
     start = torch.cat(param_list).clone()
-    
-    for iter in range(400):
+
+    for iter in range(1000):
         verts, faces = sa.diff_run(hier, param_dict)
-                        
+
         samps = sample_surface(faces, verts.unsqueeze(0), 10000)
         tsamps = sample_surface(tfaces, tverts.unsqueeze(0), 10000)
         closs = cham_loss(
@@ -65,17 +65,18 @@ def main():
         ploss = (torch.cat(param_list) - start).abs().sum()
 
         loss = closs + ploss.cuda() * 0.001
-        
+        print(float(loss))
+
         opt.zero_grad()
         loss.backward()
         opt.step()
-        
+
         if iter % 10 == 0:
-            writeObj(verts, faces, f'{iter}_' + out_file + '.obj')            
-            
+            writeObj(verts, faces, f'{iter}_' + out_file + '.obj')
+
     writeObj(verts, faces, out_file + '.obj')
     sa.fill_hier(hier, param_dict)
     writeHierProg(hier, out_file + '.txt')
-    
+
 if __name__ == '__main__':
     main()

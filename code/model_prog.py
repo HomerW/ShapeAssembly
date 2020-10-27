@@ -17,12 +17,13 @@ import argparse
 from tqdm import tqdm
 import ast
 import metrics
-from sem_valid import semValidGen
+from sem_valid import semValidGen, semValidGenBeam
+from copy import copy, deepcopy
 
 """
-Modeling logic for a generative model of ShapeAssembly Programs. 
+Modeling logic for a generative model of ShapeAssembly Programs.
 
-Encoder is defined in ENCGRU. Decoder is defined in FDGRU. 
+Encoder is defined in ENCGRU. Decoder is defined in FDGRU.
 
 run_train_decoder has the core logic for training in a teacher-forced manner
 run_eval_decoder has the core logic for evaluating in an auto-regressive manner
@@ -42,11 +43,11 @@ ADAM_EPS = 1e-6 # increase numerical stability
 VERBOSE = True
 SAVE_MODELS = True
 
-# Program reconstruction loss logic 
+# Program reconstruction loss logic
 fploss = losses.ProgLoss()
 closs = torch.nn.BCEWithLogitsLoss()
 
-# A 'tokenization' of the line command 
+# A 'tokenization' of the line command
 def cleanCommand(struct):
     assert struct.shape[1] == 1, 'bad input to clean command'
     struct = struct.squeeze()
@@ -54,18 +55,18 @@ def cleanCommand(struct):
 
     c = torch.argmax(struct[:7])
     new[c] = 1.0
-                
+
     new = new.unsqueeze(0).unsqueeze(0)
-            
+
     return new
 
-# A 'tokenization' of the line cube indices 
+# A 'tokenization' of the line cube indices
 def cleanCube(struct):
     assert struct.shape[1] == 1, 'bad input to clean cube'
     struct = struct.squeeze()
     new = torch.zeros(33, dtype=torch.float).to(device)
-    
-    c1 = torch.argmax(struct[:11])        
+
+    c1 = torch.argmax(struct[:11])
     new[c1] = 1.0
 
     c2 = torch.argmax(struct[11:22])
@@ -73,11 +74,11 @@ def cleanCube(struct):
 
     c3 = torch.argmax(struct[22:33])
     new[22+c3] = 1.0
-    
+
     new = new.unsqueeze(0).unsqueeze(0)
-            
+
     return new
-        
+
 # Multi-layer perceptron helper function
 class MLP(nn.Module):
     def __init__(self, ind, hdim1, hdim2, odim):
@@ -96,10 +97,10 @@ class MLP(nn.Module):
 class FDGRU(nn.Module):
     def __init__(self, hidden_dim):
         super(FDGRU, self).__init__()
-        
+
         self.bbdimNet = MLP(hidden_dim, hidden_dim, hidden_dim, 3)
 
-        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first = True)        
+        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first = True)
 
         self.inp_net = MLP(
             INPUT_DIM + 3 + 3,
@@ -109,9 +110,9 @@ class FDGRU(nn.Module):
         )
 
         self.cmd_net = MLP(hidden_dim, hidden_dim // 2, hidden_dim //4, 7)
-        
+
         self.cube_net = MLP(hidden_dim + 7, hidden_dim //2, hidden_dim //4, 33)
-        
+
         self.dim_net = MLP(
             hidden_dim + 3,
             hidden_dim // 2,
@@ -124,7 +125,7 @@ class FDGRU(nn.Module):
             hidden_dim // 2,
             hidden_dim // 4,
             1
-        )            
+        )
 
         self.att_net = MLP(
             hidden_dim + 22,
@@ -156,24 +157,24 @@ class FDGRU(nn.Module):
     def forward(self, inp_seq, h, h_start, bb_dims, hier_ind, gt_struct_seq=None):
 
         bb_dims = bb_dims.unsqueeze(0).unsqueeze(0).repeat(1,inp_seq.shape[1],1)
-            
+
         hier_oh = torch.zeros(1, inp_seq.shape[1], 3).to(device)
         hier_oh[0, :, min(hier_ind,2)] = 1.0
-                
+
         inp = self.inp_net(
             torch.cat(
                 (inp_seq, bb_dims, hier_oh), dim=2)
         )
-            
+
         gru_out, h = self.gru(inp, h)
-        
+
         cmd_out = self.cmd_net(gru_out)
 
         if gt_struct_seq is not None:
-            clean_cmd = gt_struct_seq[:,:,:7]            
-        else:            
+            clean_cmd = gt_struct_seq[:,:,:7]
+        else:
             clean_cmd = cleanCommand(cmd_out)
-                
+
         cube_out = self.cube_net(
             torch.cat((gru_out, clean_cmd), dim = 2)
         )
@@ -182,7 +183,7 @@ class FDGRU(nn.Module):
             clean_cube = gt_struct_seq[:,:,7:40]
         else:
             clean_cube = cleanCube(cube_out)
-            
+
         dim_out = self.dim_net(
             torch.cat((gru_out, bb_dims), dim = 2)
         )
@@ -202,11 +203,11 @@ class FDGRU(nn.Module):
         squeeze_out = self.squeeze_net(
             torch.cat((gru_out, clean_cube), dim=2)
         )
-        
+
         out = torch.cat(
             (cmd_out, cube_out, dim_out, att_out, sym_out, squeeze_out, align_out), dim=2
         )
-        
+
         next_out = self.next_net(
             torch.cat((
                 gru_out, h_start.repeat(1, gru_out.shape[1], 1)
@@ -218,15 +219,15 @@ class FDGRU(nn.Module):
                 gru_out, h_start.repeat(1, gru_out.shape[1], 1)
             ), dim = 2)
         )
-        
+
         return out, next_out, leaf_out, h
 
 
 # Helper class for bottleneck of VAE. If mle is set to true, returns the mean. Otherwise, returns a sample of the predictions mean
-# and standard deviations using the standard re-parameterization trick (along with the KL divergence). 
+# and standard deviations using the standard re-parameterization trick (along with the KL divergence).
 class Sampler(nn.Module):
     def __init__(self, feature_size, hidden_size):
-        super(Sampler, self).__init__()        
+        super(Sampler, self).__init__()
         self.mlp1 = nn.Linear(feature_size, hidden_size)
         self.mlp2mu = nn.Linear(hidden_size, feature_size)
         self.mlp2var = nn.Linear(hidden_size, feature_size)
@@ -252,32 +253,32 @@ class ENCGRU(nn.Module):
     def __init__(self, hidden_dim):
         super(ENCGRU, self).__init__()
 
-        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first = True)        
+        self.gru = nn.GRU(hidden_dim, hidden_dim, batch_first = True)
         self.inp_net = MLP(INPUT_DIM, hidden_dim, hidden_dim, hidden_dim)
         self.sampler = Sampler(hidden_dim, hidden_dim)
         self.hidden_dim = hidden_dim
         self.h_start = torch.nn.Parameter(
             torch.randn(1, 1, hidden_dim, device=device, requires_grad=True)
         )
-        
+
     def encode_program(self, hp):
         if len(hp) == 0:
             return torch.zeros(1, 1, self.hidden_dim).to(device)
-        
+
         inp_seq = torch.cat((hp['inp'], hp['tar'][-1,:,:].unsqueeze(0)), dim=0).transpose(0,1)
 
         children = [{}] + hp['children'] + [{} for _ in range(inp_seq.shape[1] - len(hp['children']) - 1)]
 
         child_mask = torch.tensor([1 if len(c) > 0 else 0 for c in children]).float().to(device)
         child_encs = torch.stack([self.encode_program(c) for c in children], dim=2).view(1, -1, self.hidden_dim)
-                
+
         local_inp = self.inp_net(inp_seq)
 
         inp = (child_mask.unsqueeze(0).unsqueeze(2) * child_encs) + ((1-child_mask).unsqueeze(0).unsqueeze(2) * local_inp)
 
         # We don't care about the token predictions, just that the program has been encoded into the hidden state
         _, h = self.gru(inp, self.h_start)
-        
+
         return h
 
     def get_latent_code(self, hp, mle):
@@ -287,32 +288,32 @@ class ENCGRU(nn.Module):
 # Logic for training the decoder (decoder) on a single hierarchical program prog (we don't use batching because hierarchical data +
 # batching = hard). h0 is the latent code to be decoded
 def run_train_decoder(prog, h0, decoder):
-    
+
     shape_result = {}
-    
+
     bb_pred = decoder.bbdimNet(h0.squeeze())
     bb_loss = (bb_pred - prog["bb_dims"]).abs().sum()
 
     shape_result['bb'] = bb_loss
-        
+
     # Create a queue of programs
     q = [(prog, h0, 0)]
     num_progs = 0.
     num_lines = 0.
-    
+
     while len(q) > 0:
 
         node, h, hier_ind = q.pop(0)
         nc_ind = 0
-        
+
         num_progs += 1.
-        
+
         children = node["children"]
         inp_seq = node["inp"].transpose(0,1)
         tar_seq = node["tar"].transpose(0,1)
         weights = node["weights"].unsqueeze(0)
         bb_dims = node["bb_dims"]
-                
+
         num_lines += inp_seq.shape[1]
 
         h_start = h.clone()
@@ -325,34 +326,34 @@ def run_train_decoder(prog, h0, decoder):
         # This is the core reconstruction loss calculation
         prog_result = fploss(
             pout,
-            tar_seq,            
+            tar_seq,
             weights
         )
-        
+
         for key in prog_result:
             if key not in shape_result:
                 shape_result[key] = prog_result[key]
             else:
                 shape_result[key] += prog_result[key]
-        
+
         cub_inds = (
             torch.argmax(tar_seq[:, :, :7], dim = 2) == 1
         ).squeeze().nonzero().squeeze()
-        
+
         cub_pleaf = pleaf[:, cub_inds, :]
 
         lt = torch.tensor([0.0 if len(c) > 0 else 1.0 for c in children]).to(device)
         _leaf_loss = closs(cub_pleaf.squeeze(), lt)
 
         _cleaf = ((cub_pleaf.squeeze() > 0.).float() == lt).sum().float()
-        
+
         if 'leaf' not in shape_result:
             shape_result['leaf'] = _leaf_loss
             shape_result['cleaf'] = _cleaf
         else:
             shape_result['leaf'] += _leaf_loss
             shape_result['cleaf'] += _cleaf
-            
+
         for i in range(cub_inds.shape[0]):
             child = children[nc_ind]
             nc_ind += 1
@@ -371,7 +372,7 @@ def model_train_results(dataset, encoder, decoder, dec_opt, enc_opt, variational
     ep_result = {}
     bc = 0.
     for batch in dataset:
-        bc += 1. 
+        bc += 1.
         batch_result = model_train(
             batch, encoder, decoder, dec_opt, enc_opt, \
             variational, loss_config
@@ -379,29 +380,29 @@ def model_train_results(dataset, encoder, decoder, dec_opt, enc_opt, variational
 
         for key in batch_result:
             res = batch_result[key]
-                
+
             if torch.is_tensor(res):
                 res = res.detach()
-                        
-            if key not in ep_result:                    
+
+            if key not in ep_result:
                 ep_result[key] = res
             else:
                 ep_result[key] += res
 
     if len(ep_result) == 0:
         return {}
-                
+
     arl = 0.
-    
-    for loss in loss_config:        
+
+    for loss in loss_config:
         ep_result[loss] /= bc
         if loss == 'kl':
-            continue            
+            continue
         if torch.is_tensor(ep_result[loss]):
             arl += ep_result[loss].detach().item()
         else:
             arl += ep_result[loss]
-            
+
     ep_result['recon'] = arl
     if ep_result['nl'] > 0:
         ep_result['cmdc'] /= ep_result['nl']
@@ -419,7 +420,7 @@ def model_train_results(dataset, encoder, decoder, dec_opt, enc_opt, variational
     if ep_result['nsq'] > 0:
         ep_result['sq_cubc'] /= ep_result['nsq']
         ep_result['facec'] /= ep_result['nsq']
-        
+
     ep_result.pop('na')
     ep_result.pop('nl')
     ep_result.pop('nc')
@@ -458,7 +459,7 @@ def model_train_results(dataset, encoder, decoder, dec_opt, enc_opt, variational
   Align Neg Corr = {ep_result['nalignc']}
   Sym Cub Corr % {ep_result['sym_cubc']}
   Sym Axis Corr % {ep_result['axisc']}""", f"{outpath}/{exp_name}/log.txt")
-    
+
     return ep_result
 
 # Full encoder + decoder training logic for a single program (i.e. a batch)
@@ -484,23 +485,23 @@ def model_train(batch, encoder, decoder, dec_opt, enc_opt, variational, loss_con
             shape_result = run_train_decoder(
                 shape[0], encoding, decoder
             )
-            
-            for res in shape_result:                
+
+            for res in shape_result:
                 if res not in batch_result:
                     batch_result[res] = shape_result[res]
                 else:
                     batch_result[res] += shape_result[res]
-                                        
+
     loss = 0.
     if len(batch_result) > 0:
         for key in loss_config:
             batch_result[key] *= loss_config[key]
-            if torch.is_tensor(batch_result[key]):            
+            if torch.is_tensor(batch_result[key]):
                 loss += batch_result[key]
 
     if torch.is_tensor(loss) and enc_opt is not None and dec_opt is not None:
         dec_opt.zero_grad()
-        enc_opt.zero_grad()                    
+        enc_opt.zero_grad()
         loss.backward()
         dec_opt.step()
         enc_opt.step()
@@ -517,24 +518,24 @@ def getHierProg(hier_prog, all_preds):
     for c in hier_prog["children"]:
         getHierProg(c, all_preds)
 
-        
+
 # Decode latent code in a hierarchical shapeAssembly program using decoder in an auto-regressive manner.
 def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
 
     index = 0
 
-    bb_pred = decoder.bbdimNet(h0.squeeze())    
-    
+    bb_pred = decoder.bbdimNet(h0.squeeze())
+
     hier_prog = {
         "children": [],
         "bb_dims": bb_pred
     }
-    
-    q = [(h0, hier_prog, 0, gt_prog)]        
+
+    q = [(h0, hier_prog, 0, gt_prog)]
     pc = 0
     num_lines = 0.
     all_preds = []
-    
+
     shape_result = {
         'corr_line_num': 0.,
         'bad_leaf': 0.
@@ -542,27 +543,28 @@ def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
 
     if gt_prog is not None and len(gt_prog) > 0:
         bb_loss = (bb_pred - gt_prog["bb_dims"]).abs().sum()
-        shape_result['bb'] = bb_loss    
+        shape_result['bb'] = bb_loss
 
-    
+
     while len(q) > 0:
         pc += 1
-                
+
         h, prog, hier_ind, gt_prog = q.pop(0)
 
         prog["name"] = index
         index += 1
-        
+
         if gt_prog is None or len(gt_prog) == 0:
             shape_result['bad_leaf'] += 1.
+
 
         # Semantic validity logic that handles local program creation
         preds, prog_out, next_q = semValidGen(
             prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample
         )
-        
+
         num_lines += len(preds)
-        
+
         q += next_q
 
         # Logic for calculating loss / metric performance in eval mode
@@ -570,22 +572,22 @@ def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
             gt_tar_seq = gt_prog["tar"].transpose(0,1)
             gt_weights = gt_prog["weights"].unsqueeze(0)
             gt_bb_dims = gt_prog["bb_dims"]
-            
+
             try:
                 if len(prog_out) > 1:
                     prog_out = torch.cat([p for p in prog_out], dim = 1)
                 else:
                     prog_out = torch.zeros(1,1,INPUT_DIM).to(device)
-                    
+
                 if prog_out.shape[1] == gt_tar_seq.shape[1]:
                     shape_result['corr_line_num'] += 1.
-                
+
                 prog_result = fploss(
                     prog_out[:,:gt_tar_seq.shape[1],:],
                     gt_tar_seq,
                     gt_weights
                 )
-                
+
                 for key in prog_result:
                     if key not in shape_result:
                         shape_result[key] = prog_result[key]
@@ -596,23 +598,308 @@ def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
                 if VERBOSE:
                     print(e)
                 pass
-                                        
+
         all_preds.append(preds)
         # Have a max number of programs to decode for any given root program
         if pc > MAX_PDEPTH:
-            break        
+            break
 
     shape_result['np'] = pc
     shape_result['nl'] = num_lines
-    
+
     try:
-        getHierProg(hier_prog, all_preds)                
+        getHierProg(hier_prog, all_preds)
         return hier_prog, shape_result
-            
+
     except Exception as e:
         if VERBOSE:
             print(f"FAILED IN EVAL DECODER WITH {e}")
         return None, shape_result
+
+# Decode latent code in a hierarchical shapeAssembly program using decoder in an auto-regressive manner.
+def run_eval_decoder_beam2(h0, decoder, rejection_sample, gt_prog = None, beam_width = None):
+
+    index = 0
+
+    bb_pred = decoder.bbdimNet(h0.squeeze())
+
+    hier_prog = {
+        "children": [],
+        "bb_dims": bb_pred
+    }
+
+    q = [(h0, hier_prog, 0, gt_prog)]
+    pc = 0
+    num_lines = 0.
+    all_preds = []
+
+    shape_result = {
+        'corr_line_num': 0.,
+        'bad_leaf': 0.
+    }
+
+    if gt_prog is not None and len(gt_prog) > 0:
+        bb_loss = (bb_pred - gt_prog["bb_dims"]).abs().sum()
+        shape_result['bb'] = bb_loss
+
+
+    while len(q) > 0:
+        pc += 1
+
+        h, prog, hier_ind, gt_prog = q.pop(0)
+
+        prog["name"] = index
+        index += 1
+
+        if gt_prog is None or len(gt_prog) == 0:
+            shape_result['bad_leaf'] += 1.
+
+
+        # # Semantic validity logic that handles local program creation
+        # preds, prog_out, next_q = semValidGenBeam(
+        #     prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample, beam_width
+        # )
+
+        # Semantic validity logic that handles local program creation
+        beams = semValidGenBeam(
+            prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample, beam_width
+        )
+        sorted_beams = sorted(beams, key=lambda x: x[-1])
+        preds, prog_out, fchildren, next_q, _ = sorted_beams[0]
+        prog['children'] = fchildren
+        # if pc == 1:
+        #     preds, prog_out, fchildren, next_q, _ = sorted_beams[0]
+        #     prog['children'] = fchildren
+        # else:
+        #     preds, prog_out, fchildren, next_q, _ = sorted_beams[1]
+        #     prog['children'] = fchildren
+
+        num_lines += len(preds)
+
+        q += next_q
+
+        # Logic for calculating loss / metric performance in eval mode
+        if gt_prog is not None and len(gt_prog) > 0:
+            gt_tar_seq = gt_prog["tar"].transpose(0,1)
+            gt_weights = gt_prog["weights"].unsqueeze(0)
+            gt_bb_dims = gt_prog["bb_dims"]
+
+            try:
+                if len(prog_out) > 1:
+                    prog_out = torch.cat([p for p in prog_out], dim = 1)
+                else:
+                    prog_out = torch.zeros(1,1,INPUT_DIM).to(device)
+
+                if prog_out.shape[1] == gt_tar_seq.shape[1]:
+                    shape_result['corr_line_num'] += 1.
+
+                prog_result = fploss(
+                    prog_out[:,:gt_tar_seq.shape[1],:],
+                    gt_tar_seq,
+                    gt_weights
+                )
+
+                for key in prog_result:
+                    if key not in shape_result:
+                        shape_result[key] = prog_result[key]
+                    else:
+                        shape_result[key] += prog_result[key]
+
+            except Exception as e:
+                if VERBOSE:
+                    print(e)
+                pass
+
+        all_preds.append(preds)
+        # Have a max number of programs to decode for any given root program
+        if pc > MAX_PDEPTH:
+            break
+
+    shape_result['np'] = pc
+    shape_result['nl'] = num_lines
+
+    try:
+        getHierProg(hier_prog, all_preds)
+        return hier_prog, shape_result
+
+    except Exception as e:
+        if VERBOSE:
+            print(f"FAILED IN EVAL DECODER WITH {e}")
+        return None, shape_result
+
+# Decode latent code in a hierarchical shapeAssembly program using decoder in an auto-regressive manner.
+def run_eval_decoder_beam(h0, decoder, rejection_sample, gt_prog = None, beam_width = None):
+
+    bb_pred = decoder.bbdimNet(h0.squeeze())
+
+    hier_prog = {
+        "children": [],
+        "bb_dims": bb_pred,
+        "name": 0
+    }
+
+    shape_result = {
+        'corr_line_num': 0.,
+        'bad_leaf': 0.
+    }
+
+    beams = {}
+    beam = {
+    "index": 0,
+    "prog_list": [],
+    "q": [],
+    "pc": 0,
+    "num_lines": 0,
+    "all_preds": [],
+    "shape_result": shape_result,
+    "score": 0
+    }
+    for b in range(beam_width):
+        beams[b] = deepcopy(beam)
+
+    if gt_prog is not None and len(gt_prog) > 0:
+        bb_loss = (bb_pred - gt_prog["bb_dims"]).abs().sum()
+        for b in beams:
+            beams[b]["shape_result"]["bb"] = bb_loss
+
+    for b in beams:
+        beams[b]["index"] += 1
+
+    if gt_prog is None or len(gt_prog) == 0:
+        for b in beams:
+            beams[b]["shape_result"]['bad_leaf'] += 1.
+
+    # Semantic validity logic that handles local program creation
+    outs = semValidGenBeam(
+        hier_prog, decoder, h0, 0, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample, beam_width
+    )
+
+    def update_beams(beams, outs, active):
+        outs.sort(key=lambda x: x[0][3])
+        new_beams = {}
+        for b in range(min(active, beam_width)):
+            preds, prog_out, next_q, score, new_prog, gt_prog = outs[b][0]
+            src_beam = deepcopy(beams[outs[b][1]])
+            new_beam = {}
+            for key in src_beam:
+                new_beam[key] = src_beam[key]
+            new_beam["num_lines"] += len(preds)
+            new_beam["q"] += next_q
+            new_beam["all_preds"].append(preds)
+            new_beam["score"] += score
+            new_beam["prog_list"].append(new_prog)
+
+            # Logic for calculating loss / metric performance in eval mode
+            if gt_prog is not None and len(gt_prog) > 0:
+                gt_tar_seq = gt_prog["tar"].transpose(0,1)
+                gt_weights = gt_prog["weights"].unsqueeze(0)
+                gt_bb_dims = gt_prog["bb_dims"]
+
+                try:
+                    if len(prog_out) > 1:
+                        prog_out = torch.cat([p for p in prog_out], dim = 1)
+                    else:
+                        prog_out = torch.zeros(1,1,INPUT_DIM).to(device)
+
+                    if prog_out.shape[1] == gt_tar_seq.shape[1]:
+                        new_beam["shape_result"]['corr_line_num'] += 1.
+
+                    prog_result = fploss(
+                        prog_out[:,:gt_tar_seq.shape[1],:],
+                        gt_tar_seq,
+                        gt_weights
+                    )
+
+                    for key in prog_result:
+                        if key not in new_beam["shape_result"]:
+                            new_beam["shape_result"][key] = prog_result[key]
+                        else:
+                            new_beam["shape_result"][key] += prog_result[key]
+
+                except Exception as e:
+                    if VERBOSE:
+                        print(e)
+                    pass
+
+            new_beams[b] = new_beam
+        return new_beams
+
+    new_outs = []
+    for x in outs:
+        preds, prog_out, children, next_q, score = x
+        new_prog = deepcopy(hier_prog)
+        new_prog['children'] = children
+        new_outs.append(((preds, prog_out, next_q, score, new_prog, gt_prog), 0))
+    beams = update_beams(beams, new_outs, beam_width)
+
+    finished_beams = []
+    active = beam_width
+    while not active <= 0:
+        all_outs = []
+        for b in beams:
+            if len(beams[b]["q"]) == 0 or beams[b]["pc"] > MAX_PDEPTH:
+                finished_beams.append(beams[b])
+                active -= 1
+                continue
+
+            children = []
+            beams[b]["pc"] += 1
+
+            h, prog, hier_ind, gt_prog = beams[b]["q"].pop(0)
+
+            prog["name"] = beams[b]["index"]
+            beams[b]["index"] += 1
+
+            if gt_prog is None or len(gt_prog) == 0:
+                beams[b]["shape_result"]['bad_leaf'] += 1.
+
+            # Semantic validity logic that handles local program creation
+            outs = semValidGenBeam(
+                prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample, beam_width
+            )
+
+            new_outs = []
+            for x in outs:
+                preds, prog_out, children, next_q, score = x
+                new_prog = deepcopy(prog)
+                new_prog['children'] = children
+                new_outs.append(((preds, prog_out, next_q, score, new_prog, gt_prog), b))
+            all_outs += new_outs
+
+        beams = update_beams(beams, all_outs, active)
+
+    for beam in finished_beams:
+        beam["shape_result"]['np'] = beam["pc"]
+        beam["shape_result"]['nl'] = beam["num_lines"]
+
+    #print(f"SCORES: {[x['score'] for x in finished_beams]}")
+    # best_beam = min(finished_beams, key=lambda x: x["score"])
+
+    try:
+        results = []
+        for beam in finished_beams:
+            queue = []
+
+            for p in reversed(beam['prog_list']):
+                if all([c == {} for c in p["children"]]):
+                    queue.append(p)
+                else:
+                    new_children = []
+                    for c in p["children"]:
+                        if not c == {}:
+                            new_children.append(queue.pop(0))
+                        else:
+                            new_children.append(c)
+                    p["children"] = new_children
+                    queue.append(p)
+            getHierProg(beam["prog_list"][0], beam['all_preds'])
+            results.append((beam["prog_list"][0], beam["shape_result"]))
+        return results
+
+    except Exception as e:
+        if VERBOSE:
+            print(f"FAILED IN EVAL DECODER WITH {e}")
+        return None
 
 # Runs an epoch of evaluation logic on the train + val datasets
 def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name, epoch, num_gen):
@@ -625,22 +912,22 @@ def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name,
 
         if len(dataset) == 0:
             continue
-        
+
         named_results = {
             'count': 0.,
             'miss_hier_prog': 0.
         }
 
         recon_sets = []
-        
-        for batch in dataset:        
+
+        for batch in dataset:
             for shape in batch:
-                
+
                 named_results[f'count'] += 1.
-                
+
                 # Always get maximum likelihood estimation (i.e. mean) of shape encoding at eval time
                 encoding, _ = get_encoding(shape[0], encoder, mle=True)
-                
+
                 prog, shape_result = run_eval_decoder(
                     encoding, decoder, False, shape[0]
                 )
@@ -655,7 +942,7 @@ def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name,
                 if prog is None:
                     named_results[f'miss_hier_prog'] += 1.
                     continue
-                                        
+
                 recon_sets.append((prog, shape[0], shape[1]))
 
         # For reconstruction, get metric performance
@@ -665,9 +952,9 @@ def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name,
 
         for key in recon_results:
             named_results[key] = recon_results[key]
-        
+
         named_results[f'miss_hier_prog'] += recon_misses
-        
+
         named_results[f'prog_creation_perc'] = (
             named_results[f'count'] - named_results[f'miss_hier_prog']
         ) / named_results[f'count']
@@ -687,7 +974,7 @@ def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name,
 
         except Exception as e:
             gen_prog_fails += 1.
-            
+
             if VERBOSE:
                 print(f"Failed generating new program with {e}")
 
@@ -701,35 +988,35 @@ def model_eval(eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name,
 
     else:
         gen_results['prog_creation_perc'] = 0.
-                                
+
     return eval_results, gen_results
 
 # Given a sample (a hierarchical program) get the encoding of it and the KL loss
 def get_encoding(sample, encoder, mle=False):
-            
+
     hd = encoder.hidden_dim
     sample = encoder.get_latent_code(sample, mle)
-    
+
     enc = sample[:, :, :hd]
     kld = sample[:, :, hd:]
 
     if mle:
-        return enc, 0.0        
+        return enc, 0.0
     else:
-        return enc, -kld.sum()                        
+        return enc, -kld.sum()
 
 # convert a text based hierarchical program into a tensorized version
 def progToData(prog):
     if len(prog) == 0:
         return {}
-    
+
     inp, tar, weights, bb_dims = progToTarget(prog["prog"])
     prog["inp"] = inp.unsqueeze(1).to(device)
     prog["tar"] = tar.unsqueeze(1).to(device)
-    prog["weights"] = weights.to(device)    
+    prog["weights"] = weights.to(device)
     prog["children"] = [progToData(c) for c in prog["children"]]
     prog["bb_dims"] = bb_dims.to(device)
-        
+
     return prog
 
 # Dummy collate function
@@ -743,9 +1030,9 @@ def loadConfigFile(exp_name):
         for line in f:
             args = eval(line)
 
-    assert args is not None, 'failed to load config' 
+    assert args is not None, 'failed to load config'
     return args
-    
+
 # Set-up new experiment directory
 def writeConfigFile(args):
     os.system(f'mkdir {outpath} > /dev/null 2>&1')
@@ -800,27 +1087,27 @@ def run_train(dataset_path, exp_name, max_shapes, epochs,
     random.seed(rd_seed)
     np.random.seed(rd_seed)
     torch.manual_seed(rd_seed)
-    
+
     raw_indices, progs = load_progs(dataset_path, max_shapes)
 
     inds_and_progs = list(zip(raw_indices, progs))
     random.shuffle(inds_and_progs)
-                            
+
     inds_and_progs = inds_and_progs[:max_shapes]
-    
+
     decoder = FDGRU(hidden_dim)
     decoder.to(device)
 
     encoder = ENCGRU(hidden_dim)
     encoder.to(device)
-             
+
     print('Converting progs to tensors')
 
     samples = []
     for ind, prog in tqdm(inds_and_progs):
         nprog = progToData(prog)
         samples.append((nprog, ind))
-            
+
     dec_opt = torch.optim.Adam(
         decoder.parameters(),
         lr = dec_lr,
@@ -834,20 +1121,20 @@ def run_train(dataset_path, exp_name, max_shapes, epochs,
     )
 
     dec_sch = torch.optim.lr_scheduler.StepLR(
-        dec_opt, 
+        dec_opt,
         step_size = dec_step,
         gamma = dec_decay
     )
 
     enc_sch = torch.optim.lr_scheduler.StepLR(
-        enc_opt, 
+        enc_opt,
         step_size = enc_step,
         gamma = enc_decay
-    )    
+    )
 
     train_ind_file = f'data_splits/{category}/train.txt'
     val_ind_file = f'data_splits/{category}/val.txt'
-        
+
     train_samples = []
     val_samples = []
 
@@ -855,45 +1142,45 @@ def run_train(dataset_path, exp_name, max_shapes, epochs,
     val_inds = getInds(val_ind_file)
 
     misses = 0.
-        
+
     for (prog, ind) in samples:
         if ind in train_inds:
-            train_samples.append((prog, ind))            
+            train_samples.append((prog, ind))
         elif ind in val_inds:
             val_samples.append((prog, ind))
         else:
             if keep_missing:
                 kept += 1
                 if random.random() < holdout_perc:
-                    val_samples.append((prog, ind))                    
+                    val_samples.append((prog, ind))
                 else:
-                    train_samples.append((prog, ind))                    
-            else:                
+                    train_samples.append((prog, ind))
+            else:
                 misses += 1
 
     print(f"Samples missed: {misses}")
     train_num = len(train_samples)
     val_num = len(val_samples)
-        
+
     train_dataset = DataLoader(train_samples, batch_size, shuffle=True, collate_fn = _col)
     eval_train_dataset = DataLoader(train_samples[:num_eval], batch_size=1, shuffle=False, collate_fn = _col)
     val_dataset = DataLoader(val_samples, batch_size, shuffle = False, collate_fn = _col)
     eval_val_dataset = DataLoader(val_samples[:num_eval], batch_size=1, shuffle = False, collate_fn = _col)
-        
+
     utils.log_print(f"Training size: {train_num}", f"{outpath}/{exp_name}/log.txt")
     utils.log_print(f"Validation size: {val_num}", f"{outpath}/{exp_name}/log.txt")
-    
+
     with torch.no_grad():
         gt_gen_results, _ = metrics.gen_metrics([s[0] for s in val_samples[:num_eval]], '', '', '', VERBOSE, False)
 
     utils.log_print(
-f""" 
+f"""
   GT Val Number of parts = {gt_gen_results['num_parts']}
   GT Val Variance = {gt_gen_results['variance']}
   GT Val Rootedness = {gt_gen_results['rootedness']}
   GT Val Stability = {gt_gen_results['stability']}
 """, f"{outpath}/{exp_name}/log.txt")
-    
+
     aepochs = []
 
     train_res_plots = {}
@@ -907,7 +1194,7 @@ f"""
         start = 0
     else:
         start = load_epoch+1
-    
+
     for e in range(start, epochs):
         do_print = (e+1) % print_per == 0
         t = time.time()
@@ -917,27 +1204,27 @@ f"""
         train_ep_result = model_train_results(train_dataset, encoder, decoder, dec_opt, enc_opt, variational, loss_config, 'train', do_print, exp_name)
 
         dec_sch.step()
-        enc_sch.step()                            
+        enc_sch.step()
 
         if do_print:
             utils.log_print(f"  Train Epoch Time = {time.time() - t}", f"{outpath}/{exp_name}/log.txt")
-        
+
         if (e+1) % eval_per == 0:
-                                            
+
             with torch.no_grad():
                 t = time.time()
                 utils.log_print(f"Doing Evaluation", f"{outpath}/{exp_name}/log.txt")
 
                 val_ep_result = model_train_results(val_dataset, encoder, decoder, None, None, False, loss_config, 'val', True, exp_name)
-                                
+
                 eval_results, gen_results  = model_eval(
                     eval_train_dataset, eval_val_dataset, encoder, decoder, exp_name, e, num_gen
                 )
-                
+
                 for name, named_results in eval_results:
                     if named_results['nc'] > 0:
                         named_results['cub_prm'] /= named_results['nc']
-                        
+
                     if named_results['na'] > 0:
                         named_results['xyz_prm'] /= named_results['na']
                         named_results['cubc'] /= named_results['na']
@@ -947,7 +1234,7 @@ f"""
 
                     if named_results['nl'] > 0:
                         named_results['cmdc'] /= named_results['nl']
-                    
+
                     if named_results['ns'] > 0:
                         named_results['sym_cubc'] /= named_results['ns']
                         named_results['axisc'] /= named_results['ns']
@@ -960,13 +1247,13 @@ f"""
                         named_results['uv_prm'] /= named_results['nsq']
                         named_results['sq_cubc'] /= named_results['nsq']
                         named_results['facec'] /= named_results['nsq']
-                        
+
                     if named_results['nap'] > 0:
                         named_results['palignc'] /= named_results['nap']
-                        
+
                     if named_results['nan'] > 0:
                         named_results['nalignc'] /= named_results['nan']
-                        
+
                     named_results.pop('nc')
                     named_results.pop('nan')
                     named_results.pop('nap')
@@ -981,17 +1268,17 @@ f"""
                     named_results.pop('axis')
                     named_results.pop('cmd')
                     named_results.pop('miss_hier_prog')
-                    
+
                     utils.log_print(
 f"""
 
   Evaluation on {name} set:
-                  
+
   Eval {name} F-score = {named_results['fscores']}
   Eval {name} IoU = {named_results['iou_shape']}
   Eval {name} PD = {named_results['param_dist_parts']}
   Eval {name} Prog Creation Perc: {named_results['prog_creation_perc']}
-  Eval {name} Cub Prm Loss = {named_results['cub_prm']} 
+  Eval {name} Cub Prm Loss = {named_results['cub_prm']}
   Eval {name} XYZ Prm Loss = {named_results['xyz_prm']}
   Eval {name} UV Prm Loss = {named_results['uv_prm']}
   Eval {name} Sym Prm Loss = {named_results['sym_prm']}
@@ -1017,11 +1304,11 @@ f"""
   Gen Rootedness = {gen_results['rootedness']}
   Gen Stability = {gen_results['stability']}
 """, f"{outpath}/{exp_name}/log.txt")
-                    
+
                 utils.log_print(f"Eval Time = {time.time() - t}", f"{outpath}/{exp_name}/log.txt")
 
                 # Plotting logic
-                
+
                 for key in train_ep_result:
                     res = train_ep_result[key]
                     if torch.is_tensor(res):
@@ -1039,7 +1326,7 @@ f"""
                         val_res_plots[key] = [res]
                     else:
                         val_res_plots[key].append(res)
-                        
+
                 for key in gen_results:
                     res = gen_results[key]
                     if torch.is_tensor(res):
@@ -1048,7 +1335,7 @@ f"""
                         gen_res_plots[key] = [res]
                     else:
                         gen_res_plots[key].append(res)
-                        
+
                 for name, named_results in eval_results:
                     for key in named_results:
                         res = named_results[key]
@@ -1058,11 +1345,11 @@ f"""
                             eval_res_plots[name][key] = [res]
                         else:
                             eval_res_plots[name][key].append(res)
-                        
-                aepochs.append(e)                                                                
-                
+
+                aepochs.append(e)
+
                 for key in train_res_plots:
-                    plt.clf()                    
+                    plt.clf()
                     plt.plot(aepochs, train_res_plots[key], label='train')
                     if key in val_res_plots:
                         plt.plot(aepochs, val_res_plots[key], label='val')
@@ -1073,15 +1360,15 @@ f"""
                     plt.savefig(f"{outpath}/{exp_name}/plots/train/{key}.png")
 
                 for key in gen_res_plots:
-                    plt.clf()                    
+                    plt.clf()
                     plt.plot(aepochs, gen_res_plots[key])
                     if key == "variance":
                         plt.yscale('log')
                     plt.grid()
                     plt.savefig(f"{outpath}/{exp_name}/plots/gen/{key}.png")
-                
+
                 for key in eval_res_plots['train']:
-                    plt.clf()                    
+                    plt.clf()
                     t_p, = plt.plot(aepochs, eval_res_plots['train'][key], label='train')
 
                     if 'val' in eval_res_plots:
@@ -1090,7 +1377,7 @@ f"""
                             plt.legend(handles=[t_p, v_p])
                     plt.grid()
                     plt.savefig(f"{outpath}/{exp_name}/plots/eval/{key}.png")
-                                        
+
             try:
                 if SAVE_MODELS:
                     utils.log_print("Saving Models", f"{outpath}/{exp_name}/log.txt")
@@ -1109,14 +1396,14 @@ def getLossConfig(args):
         'xyz_prm': args.att_prm_lw,
         'uv_prm': args.att_prm_lw,
         'sym_prm': args.att_prm_lw,
-        
+
         'cub': args.cub_lw,
         'sym_cub': args.cub_lw,
         'sq_cub': args.cub_lw,
 
         'leaf': args.leaf_lw,
         'bb': args.bb_lw,
-                
+
         'axis': args.axis_lw,
         'face': args.face_lw,
         'align': args.align_lw
@@ -1133,11 +1420,11 @@ def run_generate(args):
 
     decoder = torch.load(f"{outpath}/{args.model_name}/models/decoder_{args.load_epoch}.pt").to(device)
     encoder = torch.load(f"{outpath}/{args.model_name}/models/encoder_{args.load_epoch}.pt").to(device)
-    
+
     random.seed(args.rd_seed)
     np.random.seed(args.rd_seed)
     torch.manual_seed(args.rd_seed)
-    
+
     with torch.no_grad():
         if args.mode == "eval_gen":
             i = 0
@@ -1148,43 +1435,43 @@ def run_generate(args):
                     h0 = torch.randn(1, 1, args.hidden_dim).to(device)
                     prog, _ = run_eval_decoder(h0, decoder, True)
                     verts, faces = hier_execute(prog)
-                    
-                    utils.writeObj(verts, faces, f"{outpath}/gen_{args.exp_name}/gen_{i}.obj")                    
+
+                    utils.writeObj(verts, faces, f"{outpath}/gen_{args.exp_name}/gen_{i}.obj")
                     utils.writeHierProg(prog, f"{outpath}/gen_{args.exp_name}/gen_prog_{i}.txt")
                     i += 1
-                    
+
                 except Exception as e:
                     print(f"Failed to generate prog with {e}")
                     miss += 1
 
             print(f"Gen reject %: {miss / (args.num_gen + miss)}")
-                    
-        if args.mode == "eval_recon":            
+
+        if args.mode == "eval_recon":
             ind_file = f'data_splits/{args.category}/val.txt'
             inds = getInds(ind_file)
             for ind in tqdm(inds):
                 gtprog = utils.loadHPFromFile(f'{args.dataset_path}/{ind}.txt')
-                gtverts, gtfaces = hier_execute(gtprog)                
+                gtverts, gtfaces = hier_execute(gtprog)
                 shape = progToData(gtprog)
                 enc, _ = get_encoding(shape, encoder, mle=True)
                 prog, _ = run_eval_decoder(enc, decoder, False)
-                verts, faces = hier_execute(prog)                
-                utils.writeObj(verts, faces, f"{outpath}/gen_{args.exp_name}/{ind}_recon.obj")                                
+                verts, faces = hier_execute(prog)
+                utils.writeObj(verts, faces, f"{outpath}/gen_{args.exp_name}/{ind}_recon.obj")
                 utils.writeObj(gtverts, gtfaces, f"{outpath}/gen_{args.exp_name}/{ind}_gt.obj")
-                                                
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Run PGP model")
     parser.add_argument('-ds', '--dataset_path', help='Path to program data', type = str)
     parser.add_argument('-en', '--exp_name', help='name of experiment', type = str)
     parser.add_argument('-c', '--category', help='category', type = str)
     parser.add_argument('-mn', '--model_name', default=None, help='name of the model used for evaluation, do not specify for model_name == exp_name', type = str)
-    
+
     parser.add_argument('-ms', '--max_shapes', default = 50000, type = int, help = 'maximum number of shapes')
     parser.add_argument('-e', '--epochs', default = 100000, type = int, help = 'number of epochs')
     parser.add_argument('-hd', '--hidden_dim', default = 256, type = int, help = 'hidden dimensions size')
     parser.add_argument('-evp', '--eval_per', default = 10, type = int, help = 'how often to run evaluation')
     parser.add_argument('-v', '--variational', default = "True", type = str, help = 'If running VAE or AE')
-    parser.add_argument('-cmd_lw', '--cmd_lw', default = 1., type = float, help = 'Command loss weight')    
+    parser.add_argument('-cmd_lw', '--cmd_lw', default = 1., type = float, help = 'Command loss weight')
     parser.add_argument('-cub_lw', '--cub_lw', default = 1., type = float, help = 'Cube loss weight')
     parser.add_argument('-leaf_lw', '--leaf_lw', default = 1., type = float, help = 'Leaf loss weight')
     parser.add_argument('-axis_lw', '--axis_lw', default = 1., type = float, help = 'Axis loss weight')
@@ -1211,28 +1498,28 @@ if __name__ == '__main__':
     parser.add_argument('-mi', '--keep_missing', default = None, type = str, help = 'Should missing indices be added to train/val split (from given)')
     parser.add_argument('-efs', '--eval_fscores', action='store_true', default=False, help='use this switch to compute f-scores during reconstruction eval')
     parser.add_argument('-prp', '--print_per', default = 2, type = int, help = 'How often to print training results')
-    
+
     args = parser.parse_args()
 
     args.variational = ast.literal_eval(args.variational)
-    
+
     if args.model_name is None:
-        args.model_name = args.exp_name 
-        
+        args.model_name = args.exp_name
+
     if "eval" in args.mode:
         run_generate(args)
-        
+
     else:
         if args.mode == "load":
             load_epoch = args.load_epoch
             args = loadConfigFile(args.exp_name)
-            
+
         else:
             writeConfigFile(args)
             load_epoch = None
-                    
+
         loss_config = getLossConfig(args)
-        
+
         run_train(
             dataset_path=args.dataset_path,
             exp_name=args.exp_name,
@@ -1258,6 +1545,3 @@ if __name__ == '__main__':
             category=args.category,
             load_epoch=load_epoch
         )
-
-
-    

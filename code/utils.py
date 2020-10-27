@@ -95,20 +95,21 @@ def orientProps(center, xd, yd, zd, xdir, ydir, zdir):
         'zdir': torch.tensor(fwdir).float()
     }
 
-def locallyClean(prog):
-    cube_count = -1
-    switches = []
-    for line in prog:
-        if 'Cuboid' in line:
-            if 'Program_' in line:
-                switches.append((
-                    f'cube{cube_count}', line.split()[0]
-                ))
+def locallyClean(prog, switch=True):
+    if switch:
+        cube_count = -1
+        switches = []
+        for line in prog:
+            if 'Cuboid' in line:
+                if 'Program_' in line:
+                    switches.append((
+                        f'cube{cube_count}', line.split()[0]
+                    ))
 
-            cube_count += 1
+                cube_count += 1
 
-    for a, b in switches:
-        prog = [line.replace(b,a) for line in prog]
+        for a, b in switches:
+            prog = [line.replace(b,a) for line in prog]
 
     clines = []
 
@@ -215,7 +216,7 @@ def loadHPFromFile(progfile):
 
             elif 'squeeze' in line:
                 cur_prog.append(line[1:-1])
-
+                
     return fillHP(0, progs, children)
 
 

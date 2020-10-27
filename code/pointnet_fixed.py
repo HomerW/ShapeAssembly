@@ -84,8 +84,8 @@ class PointNetEncoder(nn.Module):
     def forward(self, x):
         x = x.transpose(2, 1)
         x = self.feat(x)[0]
-        #x = F.relu(self.fc1(x))
-        #x = F.relu(self.fc2(x))
+        # x = F.relu(self.fc1(x))
+        # x = F.relu(self.fc2(x))
         return x
 
 # class STN3d(nn.Module):
