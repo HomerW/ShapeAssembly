@@ -73,7 +73,7 @@ def round_prog(prog):
 def check_size(prog, level):
     if level > MAX_PDEPTH:
         return False
-    if len(prog["children"]) > MAX_CUBOIDS:
+    if len(prog["children"]) > MAX_CUBOIDS or len(prog["children"]) <= 1:
         return False
 
     return all([check_size(c, level + 1) for c in prog["children"] if not c == {}])
@@ -95,6 +95,7 @@ def train_inference(encoder, enc_opt, decoder, dec_opt, dataset, max_epochs=None
     loss_config = getLossConfig()
 
     for epoch in range(epochs):
+        print(f"Train epoch {epoch}")
         decoder.train()
         encoder.train()
         ep_result = {}
@@ -215,8 +216,8 @@ def wake_sleep(iterations):
         lr = enc_lr
     )
 
-    encoder.load_state_dict(torch.load("train_out/encoder-256-random.pt"))
-    decoder.load_state_dict(torch.load("train_out/decoder-256-random.pt"))
+    encoder.load_state_dict(torch.load("train_out/encoder-256-random2.pt"))
+    decoder.load_state_dict(torch.load("train_out/decoder-256-random2.pt"))
 
     for iter in range(iterations):
         dataset = infer_programs(encoder, decoder)

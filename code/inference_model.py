@@ -227,6 +227,9 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
 
         recon_sets.append((prog, shape, ind))
 
+        if named_results[f'count'] % 100 == 0:
+            print(f"Finished eval {named_results[f'count']}")
+
 
     # For reconstruction, get metric performance
     recon_results, recon_misses = metrics.recon_metrics(
