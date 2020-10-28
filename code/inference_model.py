@@ -236,6 +236,8 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
         recon_sets, outpath, exp_name, "generated", epoch, True
     )
 
+    print("Finished eval recon metrics")
+
     for key in recon_results:
         named_results[key] = recon_results[key]
 
@@ -252,8 +254,8 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
 # np.random.seed(RANDOM_SEED)
 # torch.manual_seed(RANDOM_SEED)
 #
-# #train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10000)
-# train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("random_hier_data", 3000, 2900)
+# train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10)
+# # train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("random_hier_data", 3000, 2900)
 #
 # encoder = PCEncoder()
 # encoder.to(device)
@@ -330,8 +332,8 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
 #             print_eval_results(eval_results, "val")
 #             eval_results, _ = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch)
 #             print_eval_results(eval_results, "train")
-#         torch.save(encoder.state_dict(), "train_out/encoder-256-random2.pt")
-#         torch.save(decoder.state_dict(), "train_out/decoder-256-random2.pt")
+#         # torch.save(encoder.state_dict(), "train_out/encoder-256-random2.pt")
+#         # torch.save(decoder.state_dict(), "train_out/decoder-256-random2.pt")
 #
 #
 #     dec_sch.step()

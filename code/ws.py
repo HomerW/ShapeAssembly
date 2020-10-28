@@ -41,7 +41,8 @@ device = torch.device("cuda")
 MAX_PDEPTH = 10
 MAX_CUBOIDS = 10
 
-def round_prog(prog):
+# rounds values and removes end token
+def clean_prog(prog):
     P = Program()
     new_lines = []
     for l in prog['prog']:
@@ -63,12 +64,14 @@ def round_prog(prog):
             parse = P.parseTranslate(l)
             new_num = [round(x.item(), 3) for x in parse[-1:]]
             new_lines.append(f"translate({parse[0]}, {parse[1]}, {parse[2]}, {new_num[0]})\n")
+        elif "<END>" in l:
+            pass
         else:
             new_lines.append(l)
     prog['prog'] = new_lines
     for c in prog["children"]:
         if not c == {}:
-            round_prog(c)
+            clean_prog(c)
 
 def check_size(prog, level):
     if level > MAX_PDEPTH:
@@ -168,7 +171,7 @@ def infer_programs(encoder, decoder):
         if not check_size(prog, 1):
             continue
         try:
-            round_prog(prog)
+            clean_prog(prog)
             prog_pc = prog_to_pc(prog)
             nprog = progToData(prog)
             train_samples.append((nprog, prog_pc, ind))
@@ -180,7 +183,7 @@ def infer_programs(encoder, decoder):
         if not check_size(prog, 1):
             continue
         try:
-            round_prog(prog)
+            clean_prog(prog)
             prog_pc = prog_to_pc(prog)
             nprog = progToData(prog)
             eval_val_samples.append((nprog, prog_pc, ind))

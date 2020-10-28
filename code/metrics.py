@@ -185,22 +185,22 @@ def recon_metrics(recon_sets, outpath, exp_name, name, epoch, VERBOSE):
             if VERBOSE:
                 print(f"failed Fscore for {prog_ind} with {e}")
 
-        try:
-            siou = getShapeIoU(cubes, gt_cubes, bbox)
-            if siou is not None:
-                results['iou_shape'].append(siou)
-        except Exception as e:
-            if VERBOSE:
-                print(f"failed Shape Iou for {prog_ind} with {e}")
+        # try:
+        #     siou = getShapeIoU(cubes, gt_cubes, bbox)
+        #     if siou is not None:
+        #         results['iou_shape'].append(siou)
+        # except Exception as e:
+        #     if VERBOSE:
+        #         print(f"failed Shape Iou for {prog_ind} with {e}")
 
 
-        try:
-            pd = getParamDist(cubes, gt_cubes, bbox)
-            if pd is not None:
-                results['param_dist_parts'].append(pd)
-        except Exception as e:
-            if VERBOSE:
-                print(f"failed param dist for {prog_ind} with {e}")
+        # try:
+        #     pd = getParamDist(cubes, gt_cubes, bbox)
+        #     if pd is not None:
+        #         results['param_dist_parts'].append(pd)
+        # except Exception as e:
+        #     if VERBOSE:
+        #         print(f"failed param dist for {prog_ind} with {e}")
 
 
     with open(f"{outpath}/{exp_name}/fs_data", "wb") as file:
