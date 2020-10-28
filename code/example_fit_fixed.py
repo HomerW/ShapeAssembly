@@ -3,6 +3,7 @@ import torch
 from utils import sample_surface, writePC, writeHierProg, loadObj
 from losses import ChamferLoss
 from ShapeAssembly import ShapeAssembly, writeObj
+import time
 
 device = torch.device("cuda")
 cham_loss = ChamferLoss(device)
@@ -43,19 +44,21 @@ def main():
 
     tverts = torch.tensor(tverts)
     tfaces = torch.tensor(tfaces).long()
+    tsamps = sample_surface(tfaces, tverts.unsqueeze(0), 10000)
 
     out_file = sys.argv[3]
     hier, param_dict, param_list = sa.make_hier_param_dict(lines)
 
+    start_time = time.time()
     opt = torch.optim.Adam(param_list, 0.001)
 
     start = torch.cat(param_list).clone()
 
-    for iter in range(1000):
+    for iter in range(400):
         verts, faces = sa.diff_run(hier, param_dict)
 
         samps = sample_surface(faces, verts.unsqueeze(0), 10000)
-        tsamps = sample_surface(tfaces, tverts.unsqueeze(0), 10000)
+        # tsamps = sample_surface(tfaces, tverts.unsqueeze(0), 10000)
         closs = cham_loss(
             samps.squeeze().T.unsqueeze(0).cuda(),
             tsamps.squeeze().T.unsqueeze(0).cuda(),
@@ -71,8 +74,11 @@ def main():
         loss.backward()
         opt.step()
 
-        if iter % 10 == 0:
-            writeObj(verts, faces, f'{iter}_' + out_file + '.obj')
+        # if iter % 10 == 0:
+        #     writeObj(verts, faces, f'{iter}_' + out_file + '.obj')
+
+    end_time = time.time()
+    print(f"TIME: {end_time-start_time}")
 
     writeObj(verts, faces, out_file + '.obj')
     sa.fill_hier(hier, param_dict)

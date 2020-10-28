@@ -7,7 +7,7 @@ INPUT_DIM = 63
 
 def getCubeIndex(c):
     if 'cube' in c:
-        return int(c[4:]) + 1 
+        return int(c[4:]) + 1
     elif 'bbox' in c:
         return 0
 
@@ -16,7 +16,7 @@ def indToCube(c):
         return 'bbox'
     else:
         return 'cube' + str(c-1)
-    
+
 def getAxisIndex(a):
     if a == 'X':
         return 0
@@ -54,10 +54,10 @@ def indToFace(i):
         2 : 'top',
         3 : 'bot',
         4 : 'front',
-        5 : 'back', 
+        5 : 'back',
     }
     return fm[i]
-    
+
 def getCuboidTargets(P, line):
     params = P.parseCuboid(line)
     return [torch.tensor([params[1], params[2], params[3]]), params[4]]
@@ -71,7 +71,7 @@ def getReflectTargets(P, line):
     axis[getAxisIndex(parse[1])] = 1
 
     coords = torch.tensor([float(p) for p in parse[2:]])
-    
+
     return [cub, axis]
 
 
@@ -82,7 +82,7 @@ def getTranslateTargets(P, line):
     cub[getCubeIndex(parse[0])] = 1
     axis[getAxisIndex(parse[1])] = 1
     prms = torch.tensor([float(parse[2]), parse[3]])
-    
+
     return [cub, axis, prms]
 
 
@@ -93,7 +93,7 @@ def getAttachTargets(P, line):
     cub1[getCubeIndex(parse[0])] = 1
     cub2[getCubeIndex(parse[1])] = 1
     coords = torch.tensor([float(p) for p in parse[2:]])
-    
+
     return [cub1, cub2, coords]
 
 def getSqueezeTargets(P, line):
@@ -107,11 +107,11 @@ def getSqueezeTargets(P, line):
     cub3[getCubeIndex(parse[2])] = 1
     face[getFaceIndex(parse[3])] = 1
     uv = torch.tensor([float(p) for p in parse[4:]])
-    
+
     return [cub1, cub2, cub3, face, uv]
 
 
-# Takes in a program, returns the target values for each line in the program 
+# Takes in a program, returns the target values for each line in the program
 def progToTarget(program):
     target = []
     P = Program()
@@ -124,7 +124,7 @@ def progToTarget(program):
             tl[40:43] = t[0]
             tl[62] = t[1]
             wi = [40,41,42]
-            
+
         elif "attach(" in line:
             tl[2] = 1.0
             t = getAttachTargets(P, line)
@@ -139,7 +139,7 @@ def progToTarget(program):
             tl[7:18] = t[0]
             tl[49:52] = t[1]
             wi = []
-            
+
         elif "translate(" in line:
             tl[4] = 1.0
             t = getTranslateTargets(P, line)
@@ -156,10 +156,10 @@ def progToTarget(program):
             tl[54:60] = t[3]
             tl[60:62] = t[4]
             wi = [60, 61]
-            
+
         target.append(tl)
         weight_info.append(wi)
-        
+
     start = torch.zeros(INPUT_DIM, dtype = torch.float)
     end = torch.zeros(INPUT_DIM, dtype = torch.float)
 
@@ -167,12 +167,12 @@ def progToTarget(program):
     end[6] = 1.0
 
     bb_dims = target[0][40:43]
-        
+
     weights = getWeights(torch.stack([t for t in target]), weight_info)
-    
+
     inp = torch.stack([t for t in [start] + target])
     tar = torch.stack([t for t in target + [end]])
-    
+
     return inp, tar, weights, bb_dims
 
 
@@ -211,9 +211,9 @@ def getSqueezeLine(out):
 # Takes predictions in 58 tensor format and converts to program syntax
 def predToProg(pred):
     prog = []
-    
-    c = 0 
-    
+
+    c = 0
+
     for out in pred:
         command = out[:7].max(0).indices
         if command == 0:
@@ -223,7 +223,7 @@ def predToProg(pred):
             line = getCuboidLine(out, c)
             prog.append(line)
             c += 1
-            
+
         elif command == 2:
             line = getAttachLines(out)
             prog.append(line)
@@ -234,12 +234,12 @@ def predToProg(pred):
 
         elif command == 4:
             line = getTranslateLine(out)
-            prog.append(line)            
+            prog.append(line)
 
         elif command == 5:
             line = getSqueezeLine(out)
             prog.append(line)
-            
+
         elif command == 6:
             prog.append("<END>")
 
@@ -250,7 +250,7 @@ def getWeights(target, weight_info):
     for i, wi in enumerate(weight_info):
         for w in wi:
             weights[i][w] = 1.
-            
+
     return weights
 
 
@@ -261,19 +261,19 @@ def getCuboidParams(out):
 
 def getAttachParams(out):
     coords = out[43:49]
-    return [coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]]  
+    return [coords[0], coords[1], coords[2], coords[3], coords[4], coords[5]]
 
 
 def getSqueezeParams(out):
     cube2 = indToCube(out[18:29].max(0).indices.item())
     cube3 = indToCube(out[29:40].max(0).indices.item())
     face = indToFace(out[54:60].max(0).indices.item())
-    
+
     uv = out[60:62]
-        
+
     P = Program()
     oface = P.getOppFace(face)
-    
+
     atc1, ato1 = P.getSqueezeAtt(
         face, uv[0], uv[1], cube2 == 'bbox'
     )
@@ -288,19 +288,19 @@ def getSqueezeParams(out):
             params.append(p)
         else:
             params.append(torch.tensor(p))
-            
+
     return params
-    
+
 
 def predToParams(pred):
     params = []
-        
+
     for out in pred:
         command = out[:7].max(0).indices
 
         if command == 1:
             _params = getCuboidParams(out)
-                        
+
         elif command == 2:
             _params = getAttachParams(out)
 
@@ -308,7 +308,7 @@ def predToParams(pred):
             _params = getSqueezeParams(out)
         else:
             continue
-            
+
         params += _params
-            
+
     return params

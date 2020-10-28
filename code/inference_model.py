@@ -22,10 +22,10 @@ from pointnet_fixed import PointNetEncoder as PCEncoder
 from model_prog import FDGRU, load_progs, progToData, getInds, _col, \
                                 run_train_decoder, run_eval_decoder, run_eval_decoder_beam, run_eval_decoder_beam2
 from ShapeAssembly import hier_execute, Program
-from print_fun import print_train_results, print_eval_results
+from print_fun import print_train_results, print_eval_results, getLossConfig
 
 num_samps = 10000
-hidden_dim = 1024
+hidden_dim = 256
 batch_size = 1
 num_eval = 100
 ADAM_EPS = 1e-6
@@ -242,48 +242,48 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
         named_results[f'count'] - named_results[f'miss_hier_prog']
     ) / named_results[f'count']
 
-    return named_results
+    return named_results, [(x[2], x[0]) for x in recon_sets]
 
-RANDOM_SEED = 39
-random.seed(RANDOM_SEED)
-np.random.seed(RANDOM_SEED)
-torch.manual_seed(RANDOM_SEED)
-
-train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10000)
-# train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("random_data", 1000, 900)
-
-encoder = PCEncoder()
-encoder.to(device)
-decoder = FDGRU(hidden_dim)
-decoder.to(device)
-dec_opt = torch.optim.Adam(
-    decoder.parameters(),
-    lr = dec_lr,
-    eps = ADAM_EPS
-)
-enc_opt = torch.optim.Adam(
-    encoder.parameters(),
-    lr = enc_lr
-)
-dec_sch = torch.optim.lr_scheduler.StepLR(
-    dec_opt,
-    step_size = dec_step,
-    gamma = dec_decay
-    
-enc_sch = torch.optim.lr_scheduler.StepLR(
-    enc_opt,
-    step_size = enc_step,
-    gamma = enc_decay
-)
-
-print('training ...')
-
-with torch.no_grad():
-    encoder.load_state_dict(torch.load("train_out/encoder-1024-hier.pt"))
-    decoder.load_state_dict(torch.load("train_out/decoder-1024-hier.pt"))
-    eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", 0, beam_width=5)
-    print_eval_results(eval_results, "val")
-
+# RANDOM_SEED = 39
+# random.seed(RANDOM_SEED)
+# np.random.seed(RANDOM_SEED)
+# torch.manual_seed(RANDOM_SEED)
+#
+# #train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10000)
+# train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("random_hier_data", 3000, 2900)
+#
+# encoder = PCEncoder()
+# encoder.to(device)
+# decoder = FDGRU(hidden_dim)
+# decoder.to(device)
+# dec_opt = torch.optim.Adam(
+#     decoder.parameters(),
+#     lr = dec_lr,
+#     eps = ADAM_EPS
+# )
+# enc_opt = torch.optim.Adam(
+#     encoder.parameters(),
+#     lr = enc_lr
+# )
+# dec_sch = torch.optim.lr_scheduler.StepLR(
+#     dec_opt,
+#     step_size = dec_step,
+#     gamma = dec_decay
+# )
+# enc_sch = torch.optim.lr_scheduler.StepLR(
+#     enc_opt,
+#     step_size = enc_step,
+#     gamma = enc_decay
+# )
+# loss_config = getLossConfig()
+# print('training ...')
+#
+# # with torch.no_grad():
+# #     encoder.load_state_dict(torch.load("train_out/encoder-1024-hier.pt"))
+# #     decoder.load_state_dict(torch.load("train_out/decoder-1024-hier.pt"))
+# #     eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", 0, beam_width=5)
+# #     print_eval_results(eval_results, "val")
+#
 # for epoch in range(100000):
 #     decoder.train()
 #     encoder.train()
@@ -321,14 +321,14 @@ with torch.no_grad():
 #             enc_opt.step()
 #
 #     if (epoch + 1) % 10 == 0:
-#         print_train_results(ep_result)
+#         print_train_results(ep_result, bc)
 #         with torch.no_grad():
-#             eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", epoch)
+#             eval_results, _ = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", epoch)
 #             print_eval_results(eval_results, "val")
-#             eval_results = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch)
+#             eval_results, _ = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch)
 #             print_eval_results(eval_results, "train")
-#         torch.save(encoder.state_dict(), "train_out/encoder-256-flat-just-attach-random.pt")
-#         torch.save(decoder.state_dict(), "train_out/decoder-256-flat-just-attach-random.pt")
+#         torch.save(encoder.state_dict(), "train_out/encoder-256-random2.pt")
+#         torch.save(decoder.state_dict(), "train_out/decoder-256-random2.pt")
 #
 #
 #     dec_sch.step()

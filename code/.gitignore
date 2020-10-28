@@ -8,3 +8,5 @@ train_backup
 Pointnet2_PyTorch
 *.out
 program_fit
+ws_out
+random_hier_old

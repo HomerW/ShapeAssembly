@@ -242,6 +242,8 @@ def canonical(lines):
                 return 0
             else:
                 return int(name[4:]) + 1
+        elif ("squeeze" in l) or ("reflect" in l) or ("translate" in l):
+            return 1000
         else:
             return 100
     lines.sort(key = order)

@@ -1,3 +1,5 @@
+import torch
+
 # Losses that will be used to train the model
 def getLossConfig():
     loss_config = {
@@ -95,7 +97,7 @@ Eval {name} Sym Axis Corr % {eval_results['axisc']}
 Eval {name} Corr Line # % {eval_results['corr_line_num']}
 Eval {name} Bad Leaf % {eval_results['bad_leaf']}""")
 
-def print_train_results(ep_result):
+def print_train_results(ep_result, bc):
     arl = 0.
     loss_config = getLossConfig()
 
