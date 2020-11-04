@@ -520,7 +520,7 @@ def getHierProg(hier_prog, all_preds):
 
 
 # Decode latent code in a hierarchical shapeAssembly program using decoder in an auto-regressive manner.
-def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
+def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None, canonical = True):
 
     index = 0
 
@@ -560,7 +560,7 @@ def run_eval_decoder(h0, decoder, rejection_sample, gt_prog = None):
 
         # Semantic validity logic that handles local program creation
         preds, prog_out, next_q = semValidGen(
-            prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample
+            prog, decoder, h, hier_ind, MAX_PLINES, INPUT_DIM, device, gt_prog, rejection_sample, canonical
         )
 
         num_lines += len(preds)

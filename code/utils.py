@@ -216,7 +216,7 @@ def loadHPFromFile(progfile):
 
             elif 'squeeze' in line:
                 cur_prog.append(line[1:-1])
-                
+
     return fillHP(0, progs, children)
 
 

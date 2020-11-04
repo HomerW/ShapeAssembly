@@ -72,7 +72,7 @@ def cleanLine(out):
     return new
 
 
-def clean_forward(net, inp_seq, h, h_start, bb_dims, hier_ind, input_dim, device, P):
+def clean_forward(net, inp_seq, h, h_start, bb_dims, hier_ind, input_dim, device, P, canonical):
 
     assert inp_seq.shape[1] == 1, "Clean forward handles one lines at a time"
 
@@ -94,17 +94,19 @@ def clean_forward(net, inp_seq, h, h_start, bb_dims, hier_ind, input_dim, device
 
     bad_inds = []
 
-    if P.mode == 'cuboid':
-        bad_inds = [0, 3, 4]
+    if canonical:
+        print("GOT HERE")
+        if P.mode == 'cuboid':
+            bad_inds = [0, 3, 4]
 
-    if P.mode == 'attach':
-        bad_inds = [0, 1]
+        if P.mode == 'attach':
+            bad_inds = [0, 1]
 
-    if P.mode == 'sym':
-        bad_inds = [0, 1, 2, 5]
+        if P.mode == 'sym':
+            bad_inds = [0, 1, 2, 5]
 
-    for b in bad_inds:
-        cmd_out[0, 0, b] -= BAD_DEC
+        for b in bad_inds:
+            cmd_out[0, 0, b] -= BAD_DEC
 
     command = torch.argmax(cmd_out[0,0,:]).item()
 
@@ -1183,7 +1185,7 @@ def getSVSqueezeFace(out, c2, c3, P):
 
 
 # return cleaned preds, return cleaned output, next things to add to the queue
-def semValidGen(prog, rnn, h, hier_ind, max_lines, input_dim, device, gt_prog, rejection_sample):
+def semValidGen(prog, rnn, h, hier_ind, max_lines, input_dim, device, gt_prog, rejection_sample, canonical):
     q = []
 
     prog_out = []
@@ -1225,7 +1227,8 @@ def semValidGen(prog, rnn, h, hier_ind, max_lines, input_dim, device, gt_prog, r
             hier_ind,
             input_dim,
             device,
-            P
+            P,
+            canonical
         )
 
         if not valid:

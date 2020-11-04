@@ -7,6 +7,7 @@ import sys
 import faiss
 from copy import deepcopy
 from pathlib import Path
+import os
 
 """
   This file contains all of the logic in the ShapeAssembly DSL.
@@ -1527,6 +1528,21 @@ class ShapeAssembly():
 
 
 if __name__ == '__main__':
+    # files = os.listdir(".")
+    # files = [f for f in files if f[-3:] == "txt"]
+    # mode = "run"
+    # for f in files:
+    #     out_file = f[:-3] + "obj"
+    #     prog_file = f
+    #     sa = ShapeAssembly()
+    #     lines = sa.load_lines(prog_file)
+    #     if mode == 'run':
+    #         sa.run(lines, out_file)
+    #     elif mode == 'run_local':
+    #         sa.run_local(lines, out_file)
+    #     else:
+    #         print(f'Mode {mode} not recognized')
+
     mode, prog_file, out_file = sys.argv[1], sys.argv[2], sys.argv[3]
     sa = ShapeAssembly()
     lines = sa.load_lines(prog_file)

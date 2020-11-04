@@ -118,8 +118,84 @@ def get_partnet_data(dataset_path, category, max_shapes):
 
     return train_dataset, val_dataset, eval_train_dataset, eval_val_dataset
 
+def fix_cube_count(lines):
+    P = Program()
+    cube_count = 0
+    switches = {}
+    new_lines = []
+    for l in lines:
+        if "Cuboid" in l:
+            parse = P.parseCuboid(l)
+            switches[parse[0]] = f"cube{cube_count}"
+            cube_count += 1
+    for l in lines:
+        locations = [i for (i, x) in enumerate(l) if l[i:i+4] == "cube"]
+        new_line = ""
+        prev_idx = 0
+        for i in locations:
+            new_line += l[prev_idx:i]
+            try:
+                cube_num = int(l[i+4:i+6])
+                name_len = 6
+                if not len(l[i:i+name_len].strip()) == len(l[i:i+name_len]):
+                    name_len = 5
+            except Exception as e:
+                cube_num = int(l[i+4:i+5])
+                name_len = 5
+            if not l[i:i+name_len] in switches:
+                return None
+            new_line += switches[l[i:i+name_len]]
+            prev_idx = i + name_len
+        new_line += l[prev_idx:]
+        new_lines.append(new_line)
+    return new_lines
+
+def make_canonical(lines):
+    P = Program()
+    def order(l):
+        if "Cuboid(" in l:
+            name = P.parseCuboid(l)[0]
+            if name == "bbox":
+                return 0
+            else:
+                return int(name[4:]) + 1
+        elif ("reflect" in l) or ("translate" in l):
+            return 1000
+        else:
+            return 100
+    lines.sort(key = order)
+    lines = fix_cube_count(lines)
+
+    return lines
+
+def hier_canonical(prog):
+    canon = make_canonical(prog['prog'])
+    if canon is None:
+        return False
+    prog['prog'] = canon
+    for c in prog['children']:
+        if not c == {}:
+            hier_canonical(c)
+    return True
+
 def get_random_data(dataset_path, max_shapes, train_num):
-    raw_indices, progs = load_progs(dataset_path, max_shapes)
+    # Load a dataset of hierarchical ShapeAssembly Programs
+    def load_progs2(dataset_path, max_shapes):
+        inds = os.listdir(dataset_path)
+        inds = [i.split('.')[0] for i in inds[:max_shapes]]
+        good_inds = []
+        progs = []
+        for ind in tqdm(inds):
+            hp = utils.loadHPFromFile(f'{dataset_path}/{ind}.txt')
+            if hp is not None and len(hp) > 0:
+                new_lines = fix_cube_count(hp['prog'])
+                if new_lines is not None:
+                    hp['prog'] = new_lines
+                    progs.append(hp)
+                    good_inds.append(ind)
+        return good_inds, progs
+
+    raw_indices, progs = load_progs2(dataset_path, max_shapes)
 
     inds_and_progs = list(zip(raw_indices, progs))
     random.shuffle(inds_and_progs)
@@ -158,7 +234,7 @@ def get_random_data(dataset_path, max_shapes, train_num):
     return train_dataset, val_dataset, eval_train_dataset, eval_val_dataset
 
 # Runs an epoch of evaluation logic
-def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width = None):
+def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width = None, canonical = True):
     decoder.eval()
     encoder.eval()
 
@@ -179,7 +255,7 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
 
         if beam_width is None:
             prog, shape_result = run_eval_decoder(
-                encoding, decoder, False, shape
+                encoding, decoder, False, shape, canonical
             )
         else:
             results = run_eval_decoder_beam(
@@ -249,92 +325,92 @@ def model_eval(dataset, encoder, decoder, outpath, exp_name, epoch, beam_width =
 
     return named_results, [(x[2], x[0]) for x in recon_sets]
 
-# RANDOM_SEED = 39
-# random.seed(RANDOM_SEED)
-# np.random.seed(RANDOM_SEED)
-# torch.manual_seed(RANDOM_SEED)
-#
+RANDOM_SEED = 39
+random.seed(RANDOM_SEED)
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+
 # train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_partnet_data("data/chair", "chair", 10)
-# # train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("random_hier_data", 3000, 2900)
-#
-# encoder = PCEncoder()
-# encoder.to(device)
-# decoder = FDGRU(hidden_dim)
-# decoder.to(device)
-# dec_opt = torch.optim.Adam(
-#     decoder.parameters(),
-#     lr = dec_lr,
-#     eps = ADAM_EPS
-# )
-# enc_opt = torch.optim.Adam(
-#     encoder.parameters(),
-#     lr = enc_lr
-# )
-# dec_sch = torch.optim.lr_scheduler.StepLR(
-#     dec_opt,
-#     step_size = dec_step,
-#     gamma = dec_decay
-# )
-# enc_sch = torch.optim.lr_scheduler.StepLR(
-#     enc_opt,
-#     step_size = enc_step,
-#     gamma = enc_decay
-# )
-# loss_config = getLossConfig()
-# print('training ...')
-#
-# # with torch.no_grad():
-# #     encoder.load_state_dict(torch.load("train_out/encoder-1024-hier.pt"))
-# #     decoder.load_state_dict(torch.load("train_out/decoder-1024-hier.pt"))
-# #     eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", 0, beam_width=5)
-# #     print_eval_results(eval_results, "val")
-#
-# for epoch in range(100000):
-#     decoder.train()
-#     encoder.train()
-#     ep_result = {}
-#     bc = 0.
-#     for batch in train_dataset:
-#         bc += 1.
-#         shape, points, ind = batch[0]
-#         points = points.to(device).unsqueeze(0)
-#         encoding = encoder(points).unsqueeze(0)
-#         shape_result = run_train_decoder(
-#             shape, encoding, decoder
-#         )
-#         loss = 0.
-#         if len(shape_result) > 0:
-#             for key in loss_config:
-#                 shape_result[key] *= loss_config[key]
-#                 if torch.is_tensor(shape_result[key]):
-#                     loss += shape_result[key]
-#
-#             for key in shape_result:
-#                 res = shape_result[key]
-#                 if torch.is_tensor(res):
-#                     res = res.detach()
-#                 if key not in ep_result:
-#                     ep_result[key] = res
-#                 else:
-#                     ep_result[key] += res
-#
-#         if torch.is_tensor(loss) and enc_opt is not None and dec_opt is not None:
-#             dec_opt.zero_grad()
-#             enc_opt.zero_grad()
-#             loss.backward()
-#             dec_opt.step()
-#             enc_opt.step()
-#
-#     if (epoch + 1) % 10 == 0:
-#         print_train_results(ep_result, bc)
-#         with torch.no_grad():
-#             eval_results, _ = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", epoch)
-#             print_eval_results(eval_results, "val")
-#             eval_results, _ = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch)
-#             print_eval_results(eval_results, "train")
-#         # torch.save(encoder.state_dict(), "train_out/encoder-256-random2.pt")
-#         # torch.save(decoder.state_dict(), "train_out/decoder-256-random2.pt")
-#
-#
-#     dec_sch.step()
-#     enc_sch.step()
+train_dataset, val_dataset, eval_train_dataset, eval_val_dataset = get_random_data("kenny_data", 10, 5)
+
+encoder = PCEncoder()
+encoder.to(device)
+decoder = FDGRU(hidden_dim)
+decoder.to(device)
+dec_opt = torch.optim.Adam(
+    decoder.parameters(),
+    lr = dec_lr,
+    eps = ADAM_EPS
+)
+enc_opt = torch.optim.Adam(
+    encoder.parameters(),
+    lr = enc_lr
+)
+dec_sch = torch.optim.lr_scheduler.StepLR(
+    dec_opt,
+    step_size = dec_step,
+    gamma = dec_decay
+)
+enc_sch = torch.optim.lr_scheduler.StepLR(
+    enc_opt,
+    step_size = enc_step,
+    gamma = enc_decay
+)
+loss_config = getLossConfig()
+print('training ...')
+
+# with torch.no_grad():
+#     encoder.load_state_dict(torch.load("train_out/encoder-1024-hier.pt"))
+#     decoder.load_state_dict(torch.load("train_out/decoder-1024-hier.pt"))
+#     eval_results = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", 0, beam_width=5)
+#     print_eval_results(eval_results, "val")
+
+for epoch in range(100000):
+    decoder.train()
+    encoder.train()
+    ep_result = {}
+    bc = 0.
+    for batch in train_dataset:
+        bc += 1.
+        shape, points, ind = batch[0]
+        points = points.to(device).unsqueeze(0)
+        encoding = encoder(points).unsqueeze(0)
+        shape_result = run_train_decoder(
+            shape, encoding, decoder
+        )
+        loss = 0.
+        if len(shape_result) > 0:
+            for key in loss_config:
+                shape_result[key] *= loss_config[key]
+                if torch.is_tensor(shape_result[key]):
+                    loss += shape_result[key]
+
+            for key in shape_result:
+                res = shape_result[key]
+                if torch.is_tensor(res):
+                    res = res.detach()
+                if key not in ep_result:
+                    ep_result[key] = res
+                else:
+                    ep_result[key] += res
+
+        if torch.is_tensor(loss) and enc_opt is not None and dec_opt is not None:
+            dec_opt.zero_grad()
+            enc_opt.zero_grad()
+            loss.backward()
+            dec_opt.step()
+            enc_opt.step()
+
+    if (epoch + 1) % 10 == 0:
+        print_train_results(ep_result, bc)
+        with torch.no_grad():
+            eval_results, _ = model_eval(eval_val_dataset, encoder, decoder, "train_out", "val", epoch, canonical = False)
+            print_eval_results(eval_results, "val")
+            eval_results, _ = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch, canonical = False)
+            print_eval_results(eval_results, "train")
+        # torch.save(encoder.state_dict(), "train_out/encoder-256-kenny.pt")
+        # torch.save(decoder.state_dict(), "train_out/decoder-256-kenny.pt")
+
+
+    dec_sch.step()
+    enc_sch.step()
