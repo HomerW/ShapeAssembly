@@ -124,7 +124,7 @@ def fix_cube_count(lines):
     switches = {}
     new_lines = []
     for l in lines:
-        if "Cuboid" in l:
+        if "Cuboid" in l and not ("bbox" in l):
             parse = P.parseCuboid(l)
             switches[parse[0]] = f"cube{cube_count}"
             cube_count += 1
@@ -178,7 +178,7 @@ def hier_canonical(prog):
             hier_canonical(c)
     return True
 
-def get_random_data(dataset_path, max_shapes, train_num):
+def get_random_data(dataset_path, max_shapes, val_num):
     # Load a dataset of hierarchical ShapeAssembly Programs
     def load_progs2(dataset_path, max_shapes):
         inds = os.listdir(dataset_path)
@@ -194,6 +194,7 @@ def get_random_data(dataset_path, max_shapes, train_num):
                     progs.append(hp)
                     good_inds.append(ind)
         return good_inds, progs
+
 
     raw_indices, progs = load_progs2(dataset_path, max_shapes)
 
@@ -218,8 +219,8 @@ def get_random_data(dataset_path, max_shapes, train_num):
     print(f"AVERAGE PROG LENGTH: {prog_lens/len(inds_and_progs)}")
     print(f"AVERAGE NUM CHILDREN: {num_children/len(inds_and_progs)}")
 
-    train_samples = samples[:train_num]
-    val_samples = samples[train_num:]
+    val_samples = samples[:val_num]
+    train_samples = samples[val_num:]
 
     train_num = len(train_samples)
     val_num = len(val_samples)
@@ -408,8 +409,8 @@ for epoch in range(100000):
             print_eval_results(eval_results, "val")
             eval_results, _ = model_eval(eval_train_dataset, encoder, decoder, "train_out", "train", epoch, canonical = False)
             print_eval_results(eval_results, "train")
-        # torch.save(encoder.state_dict(), "train_out/encoder-256-kenny.pt")
-        # torch.save(decoder.state_dict(), "train_out/decoder-256-kenny.pt")
+        torch.save(encoder.state_dict(), "train_out/encoder-256-kenny-nc.pt")
+        torch.save(decoder.state_dict(), "train_out/decoder-256-kenny-nc.pt")
 
 
     dec_sch.step()

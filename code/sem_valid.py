@@ -95,7 +95,6 @@ def clean_forward(net, inp_seq, h, h_start, bb_dims, hier_ind, input_dim, device
     bad_inds = []
 
     if canonical:
-        print("GOT HERE")
         if P.mode == 'cuboid':
             bad_inds = [0, 3, 4]
 
